@@ -270,7 +270,12 @@ export function buildEmailPrompt(
   const senderStyle = EMAIL_STYLES[config.sender_id as keyof typeof EMAIL_STYLES] || EMAIL_STYLES.jeanfrancois
   
   // Get comprehensive company context
-  const companyContext = buildEmailContext(config.category === 'vc' ? 'vc' : config.category === 'media' ? 'media' : 'partner')
+  const categoryMap: Record<TemplateCategory, 'vc' | 'media' | 'client' | 'partner' | 'strategic'> = {
+    'vc-outreach': 'vc',
+    'media-outreach': 'media',
+    'client-outreach': 'client',
+  }
+  const companyContext = buildEmailContext(categoryMap[config.category] || 'vc')
   
   // Get relationship context if available
   const relationshipContext = buildRelationshipContext({
