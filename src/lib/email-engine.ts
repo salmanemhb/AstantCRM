@@ -1,11 +1,18 @@
 // ============================================
 // BULLETPROOF EMAIL ENGINE
 // Mass VC Outreach System for 2000+ contacts
+// A-GRADE EMAIL GENERATION
 // ============================================
 
 import { EMAIL_TEMPLATES, EmailTemplate, TemplateCategory } from './email-templates'
 import { TEAM_MEMBERS, getSignatureText, getSignatureHtml } from './signatures'
-import { getCompanyContext } from './company-context'
+import { 
+  ASTANT_KNOWLEDGE, 
+  buildEmailContext, 
+  buildRelationshipContext,
+  STORYTELLING_HOOKS,
+  EMAIL_STYLES 
+} from './astant-knowledge-base'
 
 // ============================================
 // TYPES
@@ -249,7 +256,8 @@ export function selectBestTemplate(
 }
 
 // ============================================
-// PROMPT BUILDER - HIGHLY OPTIMIZED
+// PROMPT BUILDER - A-GRADE QUALITY
+// Uses comprehensive knowledge base
 // ============================================
 
 export function buildEmailPrompt(
@@ -259,77 +267,94 @@ export function buildEmailPrompt(
 ): string {
   const personalization = getPersonalizationData(contact)
   const sender = TEAM_MEMBERS.find(m => m.id === config.sender_id) || TEAM_MEMBERS[0]
+  const senderStyle = EMAIL_STYLES[config.sender_id as keyof typeof EMAIL_STYLES] || EMAIL_STYLES.jeanfrancois
+  
+  // Get comprehensive company context
+  const companyContext = buildEmailContext(config.category === 'vc' ? 'vc' : config.category === 'media' ? 'media' : 'partner')
+  
+  // Get relationship context if available
+  const relationshipContext = buildRelationshipContext({
+    notes: contact.notes_private || undefined,
+  })
 
-  // Build the master prompt
-  return `You are a world-class email copywriter for Astant Global Management. Your task is to generate a NEAR-PERFECT outreach email that requires minimal editing.
+  // Build the A-grade prompt
+  return `You are ${sender.name} from Astant Global Management. You write A-grade emails that read like a senior executive who has done deep research.
 
-=== COMPANY CONTEXT ===
-${getCompanyContext()}
+=== YOUR WRITING STYLE ===
+- Greeting: "${senderStyle.greeting}"
+- Tone: ${senderStyle.tone}
+- Structure: ${senderStyle.structure}
+- Characteristics: ${senderStyle.characteristics.join(', ')}
 
-=== SENDER ===
-Name: ${sender.name}
-Title: ${sender.title}
-Email: ${sender.email}
+${companyContext}
 
-=== TEMPLATE TO FOLLOW (CRITICAL - Use this as your base) ===
+${relationshipContext}
+
+=== STORYTELLING HOOKS (Use 2-3 naturally) ===
+FORBES FEATURE:
+${STORYTELLING_HOOKS.forbesFeature}
+
+ALPHA DECAY THESIS:
+${STORYTELLING_HOOKS.alphaDecayNarrative}
+
+VISION:
+${STORYTELLING_HOOKS.visionStatement}
+
+=== TEMPLATE STYLE REFERENCE ===
 Subject: ${template.subject}
-
 ${template.body}
 
-=== CONTACT TO PERSONALIZE FOR ===
+=== RECIPIENT ===
 First Name: ${contact.first_name}
 Last Name: ${contact.last_name}
 Email: ${contact.email}
-Firm: ${contact.firm || '[NO FIRM DATA - use generic but professional language]'}
+Firm: ${contact.firm || '[NO FIRM - be professional but generic about their work]'}
 Role: ${contact.role || 'Investor'}
 Geography: ${contact.geography || 'Europe'}
 Investment Focus: ${contact.investment_focus || 'Technology/FinTech'}
 
 === PERSONALIZATION OPPORTUNITIES ===
+Level: ${personalization.personalization_level.toUpperCase()}
 ${personalization.hooks.length > 0 
-  ? `Use these hooks naturally: ${personalization.hooks.join(', ')}`
-  : 'Limited data available - focus on our value proposition'}
+  ? `Hooks to use: ${personalization.hooks.join(', ')}`
+  : 'Limited data - focus on compelling value proposition'}
 
-=== TONE ===
-${config.tone === 'direct' ? 'Be concise and get to the point quickly. Busy investors appreciate brevity.' : ''}
-${config.tone === 'warm' ? 'Be friendly and personable. Build rapport before the ask.' : ''}
-${config.tone === 'technical' ? 'Lead with technical details about our AI/quant approach. They want substance.' : ''}
-${config.tone === 'visionary' ? 'Paint the big picture. Talk about market transformation and our role in it.' : ''}
+=== TONE DIRECTIVE ===
+${config.tone === 'direct' ? 'Be concise. Busy investors appreciate brevity. Get to the value fast.' : ''}
+${config.tone === 'warm' ? 'Be friendly and relationship-focused. Build rapport before the ask.' : ''}
+${config.tone === 'technical' ? 'Lead with technical substance about AI/quant approach. They want depth.' : ''}
+${config.tone === 'visionary' ? 'Paint the big picture. Talk about market transformation by 2030.' : ''}
 
-=== REQUIRED ELEMENTS ===
-${config.include_forbes_link ? '✓ Include Forbes link: https://nextleaders.forbes.it/da-studenti-a-imprenditori/' : ''}
-${config.include_demo_link ? '✓ Include Demo link: https://openmacro.ai/' : ''}
+=== REQUIREMENTS ===
+${config.include_forbes_link ? '✓ Include Forbes: https://nextleaders.forbes.it/da-studenti-a-imprenditori/' : ''}
+${config.include_demo_link ? '✓ Include Demo: https://openmacro.ai/' : ''}
 ${config.include_pitch_deck ? '✓ Mention attached pitch deck' : ''}
-${config.custom_cta ? `✓ Use this CTA: ${config.custom_cta}` : ''}
-${config.custom_context ? `✓ Additional context: ${config.custom_context}` : ''}
+${config.custom_cta ? `✓ CTA: ${config.custom_cta}` : ''}
+${config.custom_context ? `✓ Context: ${config.custom_context}` : ''}
 
-=== OUTPUT REQUIREMENTS ===
-Return a JSON object with this EXACT structure:
+=== A-GRADE QUALITY STANDARDS ===
+1. NO generic openings like "I hope this finds you well"
+2. MUST reference specific detail about their firm/role if available
+3. MUST weave storytelling naturally (Forbes, Alpha Decay thesis)
+4. 400-500 words for medium emails, 5-6 paragraphs
+5. Sound like a real senior executive, not a cold email
+6. Every sentence must add value
+
+=== OUTPUT ===
 {
-  "subject": "Compelling subject line (include their firm name if available, max 60 chars)",
-  "greeting": "Dear ${contact.first_name},",
-  "context_p1": "Opening paragraph (2-3 sentences). Reference their firm/focus if available. If not, lead with a strong hook about the market opportunity.",
-  "value_p2": "Value proposition (3-4 sentences). Include Forbes recognition, OpenMacro platform, and what makes us unique. Include links naturally.",
-  "cta": "Clear call-to-action (1-2 sentences). Be specific about next steps.",
+  "subject": "Compelling, specific subject (include firm name if available, max 60 chars)",
+  "greeting": "${senderStyle.greeting} ${contact.first_name},",
+  "context_p1": "Opening paragraph with connection/context (2-3 sentences)",
+  "value_p2": "Value proposition with storytelling, Forbes, OpenMacro (4-5 sentences with links)",
+  "cta": "Clear, specific call-to-action (1-2 sentences)",
   "confidence": "green|yellow|red",
-  "personalization_tags": ["list", "of", "what", "was", "personalized"]
+  "personalization_tags": ["list", "of", "personalization", "points"]
 }
 
-=== QUALITY CHECKLIST ===
-Before returning, verify:
-1. Subject is specific and compelling (not generic)
-2. Greeting uses correct first name
-3. If firm data exists, it's mentioned naturally in context_p1
-4. Forbes and/or OpenMacro links are included if required
-5. CTA is clear and actionable
-6. No placeholder text like {{variable}} or [PLACEHOLDER]
-7. No "null", "undefined", or "Unknown" text
-8. Total email is under 250 words
-
-CONFIDENCE SCORING:
-- "green": Firm name + role/focus used, specific personalization, clear value prop
-- "yellow": Some personalization, good structure, but could be more specific
-- "red": Generic email, missing key data, needs manual review`
+CONFIDENCE:
+- green: Strong personalization, specific details, storytelling, clear value
+- yellow: Good structure but could be more specific
+- red: Too generic, needs manual review`
 }
 
 // ============================================
