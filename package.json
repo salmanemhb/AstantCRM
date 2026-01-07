@@ -1,0 +1,39 @@
+{
+  "name": "vc-outreach-crm",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "@supabase/ssr": "^0.1.0",
+    "@supabase/supabase-js": "^2.39.0",
+    "@tiptap/extension-link": "^3.15.1",
+    "@tiptap/extension-placeholder": "^3.15.1",
+    "@tiptap/extension-underline": "^3.15.1",
+    "@tiptap/react": "^3.15.1",
+    "@tiptap/starter-kit": "^3.15.1",
+    "clsx": "^2.1.0",
+    "lucide-react": "^0.312.0",
+    "next": "14.1.0",
+    "openai": "^6.15.0",
+    "papaparse": "^5.5.3",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "tailwind-merge": "^2.2.0",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/papaparse": "^5.5.2",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "autoprefixer": "^10.4.17",
+    "postcss": "^8.4.33",
+    "tailwindcss": "^3.4.1",
+    "typescript": "^5.3.3"
+  }
+}
