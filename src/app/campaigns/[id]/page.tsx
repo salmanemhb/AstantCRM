@@ -14,13 +14,15 @@ import {
   CheckCircle,
   AlertCircle,
   Zap,
-  X
+  X,
+  Sparkles
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { generateDraft } from '@/lib/api'
 import type { Contact, ContactCampaign, Email } from '@/lib/types'
 import { formatDate, getToneLabel } from '@/lib/utils'
 import GmailEmailComposer from '@/components/gmail-email-composer'
+import BulkOperationsPanel, { BatchGenerationModal } from '@/components/bulk-operations-panel'
 
 interface LocalCampaign {
   id: string
@@ -57,6 +59,8 @@ export default function CampaignDetailPage() {
   const [generatingProgress, setGeneratingProgress] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
+  const [showBatchGeneration, setShowBatchGeneration] = useState(false)
+  const [bulkStats, setBulkStats] = useState<any>(null)
 
   const supabase = createClient()
 
@@ -89,6 +93,19 @@ export default function CampaignDetailPage() {
           .select(`*, contact:contacts (*), emails:emails (*)`)
           .eq('campaign_id', campaignId)
         setContactCampaigns(ccData || [])
+        
+        // Fetch bulk stats
+        if (ccData && ccData.length > 0) {
+          try {
+            const statsResponse = await fetch(`/api/bulk-operations?campaign_id=${campaignId}`)
+            const statsData = await statsResponse.json()
+            if (!statsData.error) {
+              setBulkStats(statsData.stats)
+            }
+          } catch (err) {
+            console.log('Could not fetch bulk stats')
+          }
+        }
       } catch (err) {
         console.error('Failed to fetch campaign:', err)
       } finally {
@@ -272,6 +289,25 @@ export default function CampaignDetailPage() {
   const unselectAllContacts = () => setSelectedContacts([])
   const availableContacts = contacts.filter(c => !contactCampaigns.some(cc => cc.contact_id === c.id))
 
+  // Refresh bulk stats
+  const refreshBulkStats = async () => {
+    try {
+      const statsResponse = await fetch(`/api/bulk-operations?campaign_id=${campaignId}`)
+      const statsData = await statsResponse.json()
+      if (!statsData.error) {
+        setBulkStats(statsData.stats)
+      }
+      // Also refresh contact campaigns
+      const { data: updatedCc } = await supabase
+        .from('contact_campaigns')
+        .select(`*, contact:contacts (*), emails:emails (*)`)
+        .eq('campaign_id', campaignId)
+      setContactCampaigns(updatedCc || [])
+    } catch (err) {
+      console.error('Failed to refresh stats:', err)
+    }
+  }
+
   if (isLoading) return <div className="min-h-screen bg-gray-50 flex items-center justify-center"><Loader2 className="h-8 w-8 text-gray-400 animate-spin" /></div>
   if (!campaign) return <div className="min-h-screen bg-gray-50 flex items-center justify-center"><div className="text-center"><AlertCircle className="h-12 w-12 text-gray-400 mx-auto mb-4" /><h2 className="text-lg font-semibold text-gray-900 mb-2">Campaign not found</h2><Link href="/campaigns" className="text-brand-600 hover:text-brand-700">Back to campaigns</Link></div></div>
 
@@ -296,6 +332,15 @@ export default function CampaignDetailPage() {
               </div>
             </div>
             <div className="flex items-center space-x-3">
+              {availableContacts.length > 0 && (
+                <button 
+                  onClick={() => setShowBatchGeneration(true)} 
+                  className="flex items-center space-x-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+                >
+                  <Sparkles className="h-4 w-4" />
+                  <span>Batch Generate</span>
+                </button>
+              )}
               <button onClick={() => setShowAddContacts(true)} className="flex items-center space-x-2 px-4 py-2 bg-brand-600 text-white rounded-lg hover:bg-brand-700 transition-colors"><Plus className="h-4 w-4" /><span>Add VCs</span></button>
               <button onClick={handleDeleteCampaign} disabled={isDeleting} className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50" title="Delete Campaign"><Trash2 className="h-5 w-5" /></button>
             </div>
@@ -307,6 +352,17 @@ export default function CampaignDetailPage() {
       {error && <div className="bg-red-50 border-b border-red-100 px-4 py-3"><div className="max-w-6xl mx-auto flex items-center justify-between"><p className="text-sm text-red-700">{error}</p><button onClick={() => setError(null)} className="text-red-500 hover:text-red-700"><X className="h-4 w-4" /></button></div></div>}
 
       <main className="max-w-6xl mx-auto px-4 py-6">
+        {/* Bulk Operations Panel - Only show when there are contacts */}
+        {bulkStats && contactCampaigns.length > 0 && (
+          <div className="mb-6">
+            <BulkOperationsPanel
+              campaignId={campaignId}
+              stats={bulkStats}
+              onRefresh={refreshBulkStats}
+            />
+          </div>
+        )}
+
         <div className="grid grid-cols-4 gap-4 mb-6">
           <div className="bg-white rounded-xl border border-gray-200 p-4"><p className="text-3xl font-bold text-gray-900">{stats.total}</p><p className="text-sm text-gray-500">Total VCs</p></div>
           <div className="bg-white rounded-xl border border-gray-200 p-4"><p className="text-3xl font-bold text-yellow-600">{stats.drafted}</p><p className="text-sm text-gray-500">Drafts Ready</p></div>
@@ -409,6 +465,15 @@ export default function CampaignDetailPage() {
           </div>
         </div>
       )}
+      
+      {/* Batch Generation Modal */}
+      <BatchGenerationModal
+        isOpen={showBatchGeneration}
+        onClose={() => setShowBatchGeneration(false)}
+        campaignId={campaignId}
+        contactIds={availableContacts.map(c => c.id)}
+        onComplete={refreshBulkStats}
+      />
     </div>
   )
 }
