@@ -169,7 +169,7 @@ export async function POST(request: NextRequest) {
           try {
             const contactCampaign = email.contact_campaigns as any
             
-            const response = await fetch(`${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/generate-draft`, {
+            const response = await fetch(`${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/generate-claude`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({

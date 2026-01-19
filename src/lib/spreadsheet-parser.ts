@@ -204,10 +204,19 @@ export function extractContact(
     lastName = parts.slice(1).join(' ') || ''
   }
   
+  // Email format validation regex
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+  const email = String(row[mapping.email!] || '').trim().toLowerCase()
+  
+  // Validate email format - skip rows with invalid emails
+  if (!email || !emailRegex.test(email)) {
+    throw new Error(`Invalid email format: "${email || '(empty)'}"`)
+  }
+
   return {
     first_name: firstName || 'Unknown',
     last_name: lastName || 'Contact',
-    email: String(row[mapping.email!] || '').trim().toLowerCase(),
+    email: email,
     firm: mapping.firm ? String(row[mapping.firm] || '').trim() || null : null,
     role: mapping.role ? String(row[mapping.role] || '').trim() || null : null,
     geography: mapping.geography ? String(row[mapping.geography] || '').trim() || null : null,

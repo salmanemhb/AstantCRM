@@ -21,6 +21,7 @@ import { TEAM_MEMBERS, getSignatureText, COMPANY_INFO } from '@/lib/signatures'
 import { EMAIL_TEMPLATES, TEMPLATE_CATEGORIES, getTemplatesByCategory, type EmailTemplate } from '@/lib/email-templates'
 import SignatureSelector from '@/components/signature-selector'
 import TemplateSelector from '@/components/template-selector'
+import { PROMPT_PRESETS, getPresetByCategory, type PromptCategory, type PromptPreset } from '@/lib/prompt-presets'
 
 interface Campaign {
   id: string
@@ -31,10 +32,23 @@ interface Campaign {
   status: 'draft' | 'ready' | 'active'
   contacts_count: number
   created_at: string
+  sender_id?: string
+  template_id?: string
+  prompt_preset_id?: string | null
+  reference_email?: string | null
 }
 
-// Demo campaigns
-const DEMO_CAMPAIGNS: Campaign[] = [
+// Safe localStorage getter (handles private browsing mode)
+function safeGetLocalStorage(key: string): string {
+  try {
+    return localStorage.getItem(key) || '[]'
+  } catch {
+    return '[]'
+  }
+}
+
+// Demo campaigns - only shown in development when no real data exists
+const DEMO_CAMPAIGNS: Campaign[] = process.env.NODE_ENV === 'development' ? [
   {
     id: 'demo-1',
     name: 'Q1 2026 VC Outreach',
@@ -56,7 +70,7 @@ Best,
     contacts_count: 25,
     created_at: new Date().toISOString(),
   },
-]
+] : []
 
 export default function CampaignsPage() {
   const router = useRouter()
@@ -66,9 +80,13 @@ export default function CampaignsPage() {
 
   const supabase = createClient()
 
-  // Get list of deleted demo campaign IDs from localStorage
+  // Get list of deleted demo campaign IDs from localStorage (with try-catch for private browsing)
   const getDeletedDemoIds = (): string[] => {
-    return JSON.parse(localStorage.getItem('deleted_demo_campaigns') || '[]')
+    try {
+      return JSON.parse(localStorage.getItem('deleted_demo_campaigns') || '[]')
+    } catch {
+      return []
+    }
   }
 
   // Filter out deleted demo campaigns
@@ -86,7 +104,7 @@ export default function CampaignsPage() {
         .order('created_at', { ascending: false })
 
       // Get locally stored campaigns
-      const stored = JSON.parse(localStorage.getItem('local_campaigns') || '[]')
+      const stored = JSON.parse(safeGetLocalStorage('local_campaigns'))
       
       if (!error && data?.length > 0) {
         // Merge database and local campaigns, avoiding duplicates
@@ -99,7 +117,7 @@ export default function CampaignsPage() {
       }
     } catch {
       // Use demo data + local storage
-      const stored = JSON.parse(localStorage.getItem('local_campaigns') || '[]')
+      const stored = JSON.parse(safeGetLocalStorage('local_campaigns'))
       setCampaigns([...filterDeletedDemos(DEMO_CAMPAIGNS), ...stored])
     } finally {
       setIsLoading(false)
@@ -145,6 +163,18 @@ export default function CampaignsPage() {
         
         if (contactCampaigns && contactCampaigns.length > 0) {
           const ccIds = contactCampaigns.map(cc => cc.id)
+          
+          // Get all email IDs for these contact_campaigns
+          const { data: emails } = await supabase.from('emails').select('id').in('contact_campaign_id', ccIds)
+          
+          if (emails && emails.length > 0) {
+            const emailIds = emails.map(e => e.id)
+            // Delete engagement_events first (foreign key constraint)
+            const { error: engagementError } = await supabase.from('engagement_events').delete().in('email_id', emailIds)
+            console.log('Delete engagement_events error:', engagementError)
+          }
+          
+          // Now delete emails
           const { error: emailError } = await supabase.from('emails').delete().in('contact_campaign_id', ccIds)
           console.log('Delete emails error:', emailError)
           const { error: ccDeleteError } = await supabase.from('contact_campaigns').delete().eq('campaign_id', id)
@@ -161,8 +191,12 @@ export default function CampaignsPage() {
       }
       
       // Always remove from localStorage (for locally created campaigns)
-      const stored = JSON.parse(localStorage.getItem('local_campaigns') || '[]')
-      localStorage.setItem('local_campaigns', JSON.stringify(stored.filter((c: Campaign) => c.id !== id)))
+      const stored = JSON.parse(safeGetLocalStorage('local_campaigns'))
+      try {
+        localStorage.setItem('local_campaigns', JSON.stringify(stored.filter((c: Campaign) => c.id !== id)))
+      } catch {
+        // localStorage may not be available
+      }
       
       // Always update local state (this handles both demo and real campaigns)
       console.log('Updating state - removing campaign:', id)
@@ -355,26 +389,26 @@ function CreateCampaignModal({
   onCreated: (campaign: Campaign) => void
 }) {
   const [name, setName] = useState('')
-  const [prompt, setPrompt] = useState('')
-  const [isGenerating, setIsGenerating] = useState(false)
+  const [notes, setNotes] = useState('')
   const [error, setError] = useState<string | null>(null)
-  const [generatedTemplate, setGeneratedTemplate] = useState<{
+  const [selectedTemplate, setSelectedTemplate] = useState<{
+    id: string
     subject: string
     body: string
-    improvements: string[]
+    placeholders: string[]
   } | null>(null)
   const [selectedSender, setSelectedSender] = useState('jean-francois')
-  const [showTemplateSelector, setShowTemplateSelector] = useState(false)
+  const [showTemplateSelector, setShowTemplateSelector] = useState(true) // Show template selector by default
 
   const supabase = createClient()
 
-  // Handle template selection
+  // Handle template selection from selector modal
   const handleTemplateSelect = (template: EmailTemplate) => {
-    setPrompt(template.description)
-    setGeneratedTemplate({
+    setSelectedTemplate({
+      id: template.id,
       subject: template.subject,
-      body: template.body + '\n\n' + getSignatureText(template.recommendedSender || selectedSender),
-      improvements: [],
+      body: template.body,
+      placeholders: template.placeholders || [],
     })
     if (template.recommendedSender) {
       setSelectedSender(template.recommendedSender)
@@ -385,50 +419,19 @@ function CreateCampaignModal({
     setShowTemplateSelector(false)
   }
 
-  const handleGenerate = async () => {
-    if (!prompt.trim()) return
-
-    setIsGenerating(true)
+  const handleSave = async () => {
+    if (!selectedTemplate) return
     setError(null)
 
-    try {
-      const response = await fetch('/api/agents', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'generate_template',
-          prompt,
-        }),
-      })
-
-      const result = await response.json()
-
-      if (!result.success) {
-        throw new Error(result.error || 'Failed to generate template')
-      }
-
-      setGeneratedTemplate({
-        subject: result.template.subject_template,
-        body: result.template.body_template,
-        improvements: result.improvements || [],
-      })
-    } catch (err: any) {
-      setError(err.message)
-    } finally {
-      setIsGenerating(false)
-    }
-  }
-
-  const handleSave = async () => {
-    if (!generatedTemplate) return
-
+    // Only include fields that exist in the database schema
     const campaignData = {
       name: name || 'New Campaign',
-      prompt,
-      template_subject: generatedTemplate.subject,
-      template_body: generatedTemplate.body,
-      status: 'ready' as const,
+      prompt: notes, // Store notes as prompt field
+      template_subject: selectedTemplate.subject,
+      template_body: selectedTemplate.body,
+      status: 'ready',
       contacts_count: 0,
+      global_context: JSON.stringify({ sender_id: selectedSender, template_id: selectedTemplate.id }),
     }
 
     try {
@@ -440,31 +443,51 @@ function CreateCampaignModal({
         .single()
 
       if (dbError) {
+        console.error('Database error:', dbError)
+        setError(`Database error: ${dbError.message}. Creating locally.`)
+        
         // Create locally if DB fails
         const localCampaign: Campaign = {
           ...campaignData,
+          status: 'ready' as const,
           id: crypto.randomUUID(),
           created_at: new Date().toISOString(),
+          sender_id: selectedSender,
+          template_id: selectedTemplate.id,
         }
         // Store in localStorage for detail page to find
-        const stored = JSON.parse(localStorage.getItem('local_campaigns') || '[]')
+        const stored = JSON.parse(safeGetLocalStorage('local_campaigns'))
         stored.push(localCampaign)
-        localStorage.setItem('local_campaigns', JSON.stringify(stored))
+        try {
+          localStorage.setItem('local_campaigns', JSON.stringify(stored))
+        } catch {
+          // localStorage may not be available
+        }
         onCreated(localCampaign)
       } else {
         onCreated(data as Campaign)
       }
-    } catch {
+    } catch (err: any) {
+      console.error('Error creating campaign:', err)
+      setError(`Error: ${err.message}. Creating locally.`)
+      
       // Create locally
       const localCampaign: Campaign = {
         ...campaignData,
+        status: 'ready' as const,
         id: crypto.randomUUID(),
         created_at: new Date().toISOString(),
+        sender_id: selectedSender,
+        template_id: selectedTemplate.id,
       }
       // Store in localStorage for detail page to find
-      const stored = JSON.parse(localStorage.getItem('local_campaigns') || '[]')
-      stored.push(localCampaign)
-      localStorage.setItem('local_campaigns', JSON.stringify(stored))
+      const storedFallback = JSON.parse(safeGetLocalStorage('local_campaigns'))
+      storedFallback.push(localCampaign)
+      try {
+        localStorage.setItem('local_campaigns', JSON.stringify(storedFallback))
+      } catch {
+        // localStorage may not be available
+      }
       onCreated(localCampaign)
     }
   }
@@ -477,164 +500,130 @@ function CreateCampaignModal({
             <div>
               <h2 className="text-xl font-semibold text-gray-900">Create Campaign</h2>
               <p className="text-sm text-gray-500 mt-1">
-                Use a template or describe the email you want
+                Select a template - emails will be personalized for each contact
               </p>
             </div>
             <button
-              onClick={() => setShowTemplateSelector(true)}
-              className="flex items-center space-x-2 px-4 py-2 bg-brand-50 text-brand-700 rounded-lg hover:bg-brand-100 transition-colors"
+              onClick={onClose}
+              className="text-gray-400 hover:text-gray-600 text-2xl leading-none"
             >
-              <FileText className="h-4 w-4" />
-              <span className="text-sm font-medium">Use Template</span>
+              ×
             </button>
           </div>
         </div>
 
         <div className="p-6 space-y-6">
-          {/* Sender Selection */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Send As
-            </label>
-            <SignatureSelector
-              selectedMemberId={selectedSender}
-              onSelect={setSelectedSender}
-              showPreview={true}
-            />
-          </div>
-          
-          {/* Campaign Name */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Campaign Name
-            </label>
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Q1 2026 VC Outreach"
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
-            />
-          </div>
+          {/* Template Selection - Main Focus */}
+          {!selectedTemplate ? (
+            <div className="text-center py-8">
+              <div className="w-16 h-16 bg-brand-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <FileText className="h-8 w-8 text-brand-600" />
+              </div>
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">Choose a Template</h3>
+              <p className="text-sm text-gray-500 mb-4">
+                Select one of Jean-François's professional email templates
+              </p>
+              <button
+                onClick={() => setShowTemplateSelector(true)}
+                className="inline-flex items-center space-x-2 px-6 py-3 bg-brand-600 text-white rounded-lg hover:bg-brand-700"
+              >
+                <FileText className="h-5 w-5" />
+                <span>Browse Templates</span>
+              </button>
+            </div>
+          ) : (
+            <>
+              {/* Selected Template Preview */}
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center space-x-2">
+                    <FileText className="h-5 w-5 text-green-600" />
+                    <span className="font-medium text-green-800">Template Selected</span>
+                  </div>
+                  <button
+                    onClick={() => setShowTemplateSelector(true)}
+                    className="text-sm text-brand-600 hover:text-brand-700"
+                  >
+                    Change
+                  </button>
+                </div>
+                <div className="bg-white rounded-lg p-3 border border-green-200">
+                  <p className="text-sm font-medium text-gray-900 mb-1">
+                    Subject: {selectedTemplate.subject}
+                  </p>
+                  <p className="text-xs text-gray-500 line-clamp-3">
+                    {selectedTemplate.body.substring(0, 200)}...
+                  </p>
+                </div>
+                {selectedTemplate.placeholders.length > 0 && (
+                  <div className="mt-3">
+                    <p className="text-xs text-green-700 mb-1">Placeholders that will be personalized:</p>
+                    <div className="flex flex-wrap gap-1">
+                      {selectedTemplate.placeholders.map(p => (
+                        <code key={p} className="px-2 py-0.5 bg-white border border-green-300 text-green-700 text-xs rounded">
+                          [{p}]
+                        </code>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
 
-          {/* Prompt */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Describe your email *
-            </label>
-            <textarea
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              rows={4}
-              placeholder="Example: A warm, founder-to-investor email introducing Astant. Mention our AI technology briefly. Ask for a 15-minute call. Keep it under 120 words. Professional but conversational tone."
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
-            />
-            <p className="text-xs text-gray-500 mt-1">
-              Be specific about tone, length, and what you want to include
-            </p>
-          </div>
+              {/* Sender Selection */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Send As
+                </label>
+                <SignatureSelector
+                  selectedMemberId={selectedSender}
+                  onSelect={setSelectedSender}
+                  showPreview={true}
+                />
+              </div>
+              
+              {/* Campaign Name */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Campaign Name
+                </label>
+                <input
+                  type="text"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Q1 2026 VC Outreach"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                />
+              </div>
 
-          {/* Generate Button */}
-          {!generatedTemplate && (
-            <button
-              onClick={handleGenerate}
-              disabled={!prompt.trim() || isGenerating}
-              className="w-full flex items-center justify-center space-x-2 px-4 py-3 bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50"
-            >
-              {isGenerating ? (
-                <>
-                  <Loader2 className="h-5 w-5 animate-spin" />
-                  <span>Generating with GPT-4o...</span>
-                </>
-              ) : (
-                <>
-                  <Sparkles className="h-5 w-5" />
-                  <span>Generate Template</span>
-                </>
-              )}
-            </button>
+              {/* Notes (Optional) */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Notes (optional)
+                </label>
+                <textarea
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  rows={2}
+                  placeholder="Any notes about this campaign..."
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                />
+              </div>
+
+              {/* Info Box */}
+              <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                <p className="text-sm text-blue-700">
+                  <strong>How it works:</strong> When you add contacts to this campaign, 
+                  the system will automatically replace placeholders like [RECIPIENT_NAME] 
+                  with their actual information. The email text stays exactly the same.
+                </p>
+              </div>
+            </>
           )}
 
           {/* Error */}
           {error && (
             <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
               <p className="text-sm text-red-700">{error}</p>
-            </div>
-          )}
-
-          {/* Generated Template */}
-          {generatedTemplate && (
-            <div className="space-y-4">
-              <div className="flex items-center space-x-2 text-green-600">
-                <Sparkles className="h-5 w-5" />
-                <span className="font-medium">Template Generated!</span>
-              </div>
-
-              {/* Improvements */}
-              {generatedTemplate.improvements.length > 0 && (
-                <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                  <p className="text-xs font-medium text-blue-700 mb-1">AI Improvements Applied:</p>
-                  <ul className="text-xs text-blue-600 space-y-1">
-                    {generatedTemplate.improvements.map((imp, i) => (
-                      <li key={i}>• {imp}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {/* Subject */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Subject Line
-                </label>
-                <input
-                  type="text"
-                  value={generatedTemplate.subject}
-                  onChange={(e) => setGeneratedTemplate({
-                    ...generatedTemplate,
-                    subject: e.target.value,
-                  })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
-                />
-              </div>
-
-              {/* Body */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Email Body
-                </label>
-                <textarea
-                  value={generatedTemplate.body}
-                  onChange={(e) => setGeneratedTemplate({
-                    ...generatedTemplate,
-                    body: e.target.value,
-                  })}
-                  rows={10}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500 font-mono text-sm"
-                />
-              </div>
-
-              {/* Placeholders Legend */}
-              <div className="p-3 bg-gray-50 rounded-lg">
-                <p className="text-xs font-medium text-gray-700 mb-2">Placeholders (will be replaced per contact):</p>
-                <div className="flex flex-wrap gap-2">
-                  {['{first_name}', '{firm}', '{role}', '{investment_focus}'].map(p => (
-                    <code key={p} className="px-2 py-0.5 bg-gray-200 text-gray-700 text-xs rounded">
-                      {p}
-                    </code>
-                  ))}
-                </div>
-              </div>
-
-              {/* Regenerate */}
-              <button
-                onClick={handleGenerate}
-                disabled={isGenerating}
-                className="text-sm text-brand-600 hover:text-brand-700 flex items-center space-x-1"
-              >
-                <Sparkles className="h-4 w-4" />
-                <span>Regenerate</span>
-              </button>
             </div>
           )}
         </div>
@@ -647,13 +636,13 @@ function CreateCampaignModal({
           >
             Cancel
           </button>
-          {generatedTemplate && (
+          {selectedTemplate && (
             <button
               onClick={handleSave}
               className="flex items-center space-x-2 px-6 py-2 bg-brand-600 text-white rounded-lg hover:bg-brand-700"
             >
               <FileText className="h-4 w-4" />
-              <span>Save Campaign</span>
+              <span>Create Campaign</span>
             </button>
           )}
         </div>

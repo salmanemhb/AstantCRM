@@ -15,14 +15,18 @@ import {
   AlertCircle,
   Zap,
   X,
-  Sparkles
+  Sparkles,
+  Copy,
+  Save
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { generateDraft } from '@/lib/api'
-import type { Contact, ContactCampaign, Email } from '@/lib/types'
+import type { Contact, ContactCampaign, Email, EmailJsonBody } from '@/lib/types'
 import { formatDate, getToneLabel } from '@/lib/utils'
 import GmailEmailComposer from '@/components/gmail-email-composer'
 import BulkOperationsPanel, { BatchGenerationModal } from '@/components/bulk-operations-panel'
+import { getSignatureText, getMemberById } from '@/lib/signatures'
+// Note: template-utils is used by gmail-email-composer for updateSenderInBody
 
 interface LocalCampaign {
   id: string
@@ -43,6 +47,21 @@ interface ExtendedContactCampaign extends ContactCampaign {
   emails?: Email[]
 }
 
+// Saved format template - stores the FORMAT (structure) of an email
+// When applied, AI reformats other emails' content to match this structure
+// The actual personalized content of each email is preserved
+interface SavedFormat {
+  // The template email's body (as an example of the desired format)
+  templateBody: EmailJsonBody
+  // HTML structure for format analysis
+  templateHtml: string
+  // Metadata
+  bannerEnabled: boolean
+  savedFromEmail: string
+  savedFromContactName: string
+  savedAt: string
+}
+
 export default function CampaignDetailPage() {
   const params = useParams()
   const router = useRouter()
@@ -61,6 +80,35 @@ export default function CampaignDetailPage() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const [showBatchGeneration, setShowBatchGeneration] = useState(false)
   const [bulkStats, setBulkStats] = useState<any>(null)
+  
+  // Saved format state - stores the FORMAT/STRUCTURE to apply to other emails
+  const [savedFormat, setSavedFormat] = useState<SavedFormat | null>(() => {
+    // Load from localStorage on mount (client-side only)
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem(`campaign-format-${campaignId}`)
+        if (stored) {
+          return JSON.parse(stored)
+        }
+      } catch {
+        // localStorage may not be available in private browsing
+        return null
+      }
+    }
+    return null
+  })
+  const [isApplyingFormat, setIsApplyingFormat] = useState(false)
+  
+  // Persist savedFormat to localStorage whenever it changes
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      if (savedFormat) {
+        localStorage.setItem(`campaign-format-${campaignId}`, JSON.stringify(savedFormat))
+      } else {
+        localStorage.removeItem(`campaign-format-${campaignId}`)
+      }
+    }
+  }, [savedFormat, campaignId])
 
   const supabase = createClient()
 
@@ -88,10 +136,17 @@ export default function CampaignDetailPage() {
           .order('last_name', { ascending: true })
         setContacts(contactsData || [])
 
-        const { data: ccData } = await supabase
+        const { data: ccData, error: ccError } = await supabase
           .from('contact_campaigns')
           .select(`*, contact:contacts (*), emails:emails (*)`)
           .eq('campaign_id', campaignId)
+          .order('updated_at', { ascending: true })
+        
+        // Handle query error by showing empty state rather than crashing
+        if (ccError) {
+          console.error('[CAMPAIGN-PAGE] Failed to fetch contact_campaigns:', ccError)
+        }
+        
         setContactCampaigns(ccData || [])
         
         // Fetch bulk stats
@@ -127,17 +182,36 @@ export default function CampaignDetailPage() {
         // First delete all emails associated with this campaign's contact_campaigns
         const ccIds = contactCampaigns.map(cc => cc.id)
         if (ccIds.length > 0) {
+          // Get all email IDs for these contact_campaigns
+          const { data: emails } = await supabase.from('emails').select('id').in('contact_campaign_id', ccIds)
+          
+          if (emails && emails.length > 0) {
+            const emailIds = emails.map(e => e.id)
+            // Delete engagement_events first (foreign key constraint)
+            await supabase.from('engagement_events').delete().in('email_id', emailIds)
+          }
+          
+          // Get unified_thread_ids to clean up orphaned threads
+          const threadIds = contactCampaigns.map(cc => cc.unified_thread_id).filter(Boolean)
+          
+          // Now delete emails and contact_campaigns
           await supabase.from('emails').delete().in('contact_campaign_id', ccIds)
           await supabase.from('contact_campaigns').delete().eq('campaign_id', campaignId)
+          
+          // Delete orphaned unified_threads
+          if (threadIds.length > 0) {
+            await supabase.from('unified_threads').delete().in('id', threadIds)
+          }
         }
         
         // Now delete the campaign from database
         await supabase.from('campaigns').delete().eq('id', campaignId)
       }
       
-      // Always clean up localStorage
+      // Always clean up localStorage (including saved format)
       const stored = JSON.parse(localStorage.getItem('local_campaigns') || '[]')
       localStorage.setItem('local_campaigns', JSON.stringify(stored.filter((c: any) => c.id !== campaignId)))
+      localStorage.removeItem(`campaign-format-${campaignId}`)
       router.push('/campaigns')
     } catch (err) {
       setError('Failed to delete campaign')
@@ -152,51 +226,129 @@ export default function CampaignDetailPage() {
     
     try {
       if (!isDemoContact) {
-        await supabase.from('emails').delete().eq('contact_campaign_id', contactCampaignId)
-        await supabase.from('contact_campaigns').delete().eq('id', contactCampaignId)
+        // Get the contact_campaign to find its unified_thread_id
+        const { data: cc, error: ccError } = await supabase
+          .from('contact_campaigns')
+          .select('unified_thread_id')
+          .eq('id', contactCampaignId)
+          .single()
+        
+        if (ccError) throw new Error(`Failed to fetch contact_campaign: ${ccError.message}`)
+        
+        // Get email IDs first to delete engagement_events
+        const { data: emails, error: emailsError } = await supabase.from('emails').select('id').eq('contact_campaign_id', contactCampaignId)
+        if (emailsError) throw new Error(`Failed to fetch emails: ${emailsError.message}`)
+        
+        if (emails && emails.length > 0) {
+          const emailIds = emails.map(e => e.id)
+          const { error: eventsError } = await supabase.from('engagement_events').delete().in('email_id', emailIds)
+          if (eventsError) console.warn('Failed to delete engagement_events:', eventsError)
+        }
+        
+        const { error: deleteEmailsError } = await supabase.from('emails').delete().eq('contact_campaign_id', contactCampaignId)
+        if (deleteEmailsError) throw new Error(`Failed to delete emails: ${deleteEmailsError.message}`)
+        
+        const { error: deleteCcError } = await supabase.from('contact_campaigns').delete().eq('id', contactCampaignId)
+        if (deleteCcError) throw new Error(`Failed to delete contact_campaign: ${deleteCcError.message}`)
+        
+        // Delete orphaned unified_thread
+        if (cc?.unified_thread_id) {
+          const { error: threadError } = await supabase.from('unified_threads').delete().eq('id', cc.unified_thread_id)
+          if (threadError) console.warn('Failed to delete unified_thread:', threadError)
+        }
       }
-      // Always update local state
+      // Update local state only after successful database operations
       setContactCampaigns(prev => prev.filter(cc => cc.id !== contactCampaignId))
       setSuccessMessage(`${contactName} removed from campaign`)
       setTimeout(() => setSuccessMessage(null), 3000)
-    } catch (err) {
-      setError('Failed to remove contact from campaign')
+    } catch (err: any) {
+      console.error('Delete contact error:', err)
+      setError(err.message || 'Failed to remove contact from campaign')
     }
   }
 
   const handleAddContacts = async () => {
-    if (selectedContacts.length === 0) return
+    console.log('[handleAddContacts] Starting...', { selectedContacts, campaignId })
+    if (selectedContacts.length === 0) {
+      console.log('[handleAddContacts] No contacts selected, returning')
+      return
+    }
     setIsGenerating(true)
     setGeneratingProgress(0)
     setError(null)
     try {
-      const existingContactIds = contactCampaigns.map(cc => cc.contact_id)
+      // Re-fetch existing contact_campaigns from database to avoid stale data
+      console.log('[handleAddContacts] Fetching existing contact_campaigns...')
+      const { data: existingCCs, error: fetchError } = await supabase
+        .from('contact_campaigns')
+        .select('contact_id')
+        .eq('campaign_id', campaignId)
+      
+      if (fetchError) {
+        console.error('[handleAddContacts] Error fetching existing CCs:', fetchError)
+      }
+      console.log('[handleAddContacts] Existing CCs:', existingCCs)
+      
+      const existingContactIds = existingCCs?.map(cc => cc.contact_id) || []
       const newContacts = selectedContacts.filter(id => !existingContactIds.includes(id))
+      console.log('[handleAddContacts] New contacts to add:', newContacts)
+      
+      if (newContacts.length === 0) {
+        console.log('[handleAddContacts] All selected contacts already in campaign')
+        setSuccessMessage('All selected contacts are already in this campaign')
+        setTimeout(() => setSuccessMessage(null), 3000)
+        setIsGenerating(false)
+        return
+      }
 
       for (let i = 0; i < newContacts.length; i++) {
         const contactId = newContacts[i]
         const contact = contacts.find(c => c.id === contactId)
+        console.log(`[handleAddContacts] Processing contact ${i + 1}/${newContacts.length}:`, contactId, contact?.email)
 
+        console.log('[handleAddContacts] Creating unified_thread...')
         const { data: thread, error: threadError } = await supabase
           .from('unified_threads')
           .insert({ firm_name: contact?.firm || 'Unknown Firm', status: 'active' })
           .select()
           .single()
-        if (threadError) throw threadError
+        if (threadError) {
+          console.error('[handleAddContacts] Thread creation error:', threadError)
+          throw threadError
+        }
+        console.log('[handleAddContacts] Thread created:', thread.id)
 
-        await supabase.from('contact_campaigns').insert({
-          contact_id: contactId,
-          campaign_id: campaignId,
-          unified_thread_id: thread.id,
-          stage: 'drafted',
-          confidence_score: 'yellow',
-        })
+        // Insert contact_campaign and wait for confirmation before generating draft
+        console.log('[handleAddContacts] Creating contact_campaign...')
+        const { data: newCC, error: ccError } = await supabase
+          .from('contact_campaigns')
+          .insert({
+            contact_id: contactId,
+            campaign_id: campaignId,
+            unified_thread_id: thread.id,
+            stage: 'drafted',
+            confidence_score: 'yellow',
+          })
+          .select()
+          .single()
+        
+        if (ccError) {
+          console.error('[handleAddContacts] CC creation error:', ccError)
+          throw ccError
+        }
+        if (!newCC) {
+          console.error('[handleAddContacts] CC not created')
+          throw new Error('Failed to create contact_campaign record')
+        }
+        console.log('[handleAddContacts] CC created:', newCC.id)
 
+        console.log('[handleAddContacts] Generating draft...')
         await generateDraft({
           contact_id: contactId,
           campaign_id: campaignId,
           signature: 'Best regards,\nAstant Global Management',
         })
+        console.log('[handleAddContacts] Draft generated for contact:', contactId)
         setGeneratingProgress(((i + 1) / newContacts.length) * 100)
       }
 
@@ -204,6 +356,7 @@ export default function CampaignDetailPage() {
         .from('contact_campaigns')
         .select(`*, contact:contacts (*), emails:emails (*)`)
         .eq('campaign_id', campaignId)
+        .order('updated_at', { ascending: true })
       setContactCampaigns(updatedCc || [])
       setShowAddContacts(false)
       setSelectedContacts([])
@@ -218,48 +371,124 @@ export default function CampaignDetailPage() {
   }
 
   const handleApproveEmail = async (email: Email) => {
+    console.log('[handleApproveEmail] Starting...', { emailId: email.id, contactCampaignId: email.contact_campaign_id })
+    setError(null) // Clear any previous errors
     try {
-      await supabase.from('emails').update({ approved: true }).eq('id', email.id)
-      await supabase.from('contact_campaigns').update({ stage: 'approved' }).eq('id', email.contact_campaign_id)
+      const approvedAt = new Date().toISOString()
+      console.log('[handleApproveEmail] Updating email with approved=true, approved_at=', approvedAt)
+      const { error: emailError, data: emailData } = await supabase.from('emails').update({ approved: true, approved_at: approvedAt }).eq('id', email.id).select()
+      if (emailError) {
+        console.error('[handleApproveEmail] Email update error:', emailError)
+        throw emailError
+      }
+      console.log('[handleApproveEmail] Email updated:', emailData)
+      
+      console.log('[handleApproveEmail] Updating contact_campaign stage to approved')
+      const { error: ccError, data: ccData } = await supabase.from('contact_campaigns').update({ stage: 'approved' }).eq('id', email.contact_campaign_id).select()
+      if (ccError) {
+        console.error('[handleApproveEmail] CC update error:', ccError)
+        throw ccError
+      }
+      console.log('[handleApproveEmail] CC updated:', ccData)
+      
       setContactCampaigns(prev => prev.map(cc => cc.id === email.contact_campaign_id 
         ? { ...cc, stage: 'approved', emails: cc.emails?.map(e => e.id === email.id ? { ...e, approved: true } : e) } 
         : cc))
       setSuccessMessage('Email approved!')
       setTimeout(() => setSuccessMessage(null), 2000)
-    } catch (err) {
-      setError('Failed to approve email')
+    } catch (err: any) {
+      setError(err.message || 'Failed to approve email')
+    }
+  }
+
+  const handleUnapproveEmail = async (email: Email) => {
+    console.log('[handleUnapproveEmail] Starting...', { emailId: email.id, contactCampaignId: email.contact_campaign_id })
+    setError(null)
+    try {
+      console.log('[handleUnapproveEmail] Updating email with approved=false, approved_at=null')
+      const { error: emailError } = await supabase.from('emails').update({ approved: false, approved_at: null }).eq('id', email.id)
+      if (emailError) {
+        console.error('[handleUnapproveEmail] Email update error:', emailError)
+        throw emailError
+      }
+      
+      console.log('[handleUnapproveEmail] Updating contact_campaign stage to drafted')
+      const { error: ccError } = await supabase.from('contact_campaigns').update({ stage: 'drafted' }).eq('id', email.contact_campaign_id)
+      if (ccError) {
+        console.error('[handleUnapproveEmail] CC update error:', ccError)
+        throw ccError
+      }
+      
+      setContactCampaigns(prev => prev.map(cc => cc.id === email.contact_campaign_id 
+        ? { ...cc, stage: 'drafted', emails: cc.emails?.map(e => e.id === email.id ? { ...e, approved: false } : e) } 
+        : cc))
+      setSuccessMessage('Email unlocked for editing')
+      setTimeout(() => setSuccessMessage(null), 2000)
+    } catch (err: any) {
+      setError(err.message || 'Failed to unlock email')
     }
   }
 
   const handleSaveEmail = async (emailId: string, updates: Partial<Email>) => {
+    setError(null) // Clear any previous errors
     try {
-      await supabase.from('emails').update(updates).eq('id', emailId)
+      const { error: saveError } = await supabase.from('emails').update(updates).eq('id', emailId)
+      if (saveError) throw saveError
+      
+      // If the sender was changed (signatureMemberId in current_body), also update contact_campaign.sender_id
+      // This ensures the email is sent FROM the correct person
+      if (updates.current_body?.signatureMemberId) {
+        const newSenderId = updates.current_body.signatureMemberId
+        // Find the contact_campaign for this email
+        const cc = contactCampaigns.find(c => c.emails?.some(e => e.id === emailId))
+        if (cc) {
+          console.log('[handleSaveEmail] Updating sender_id on contact_campaign:', cc.id, '->', newSenderId)
+          const { error: ccError } = await supabase
+            .from('contact_campaigns')
+            .update({ sender_id: newSenderId })
+            .eq('id', cc.id)
+          if (ccError) {
+            console.error('[handleSaveEmail] Failed to update sender_id:', ccError)
+          }
+        }
+      }
+      
       setContactCampaigns(prev => prev.map(cc => ({
         ...cc,
+        // Also update sender_id in local state if changed
+        sender_id: updates.current_body?.signatureMemberId && cc.emails?.some(e => e.id === emailId) 
+          ? updates.current_body.signatureMemberId 
+          : cc.sender_id,
         emails: cc.emails?.map(e => e.id === emailId ? { ...e, ...updates } : e)
       })))
       setSuccessMessage('Email saved!')
       setTimeout(() => setSuccessMessage(null), 2000)
-    } catch (err) {
-      setError('Failed to save email')
+    } catch (err: any) {
+      setError(err.message || 'Failed to save email')
     }
   }
 
   const handleSendEmail = async (email: Email, cc: ExtendedContactCampaign) => {
+    console.log('[handleSendEmail] Starting...', { emailId: email.id, contactEmail: cc.contact?.email })
     try {
       // Use the send-email API endpoint
+      console.log('[handleSendEmail] Calling /api/send-email...')
       const response = await fetch('/api/send-email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email_id: email.id }),
       })
+      console.log('[handleSendEmail] Response status:', response.status)
       
       const result = await response.json()
+      console.log('[handleSendEmail] Result:', result)
       
       if (!result.success) {
+        console.error('[handleSendEmail] API returned failure:', result.error)
         throw new Error(result.error || 'Failed to send email')
       }
       
+      console.log('[handleSendEmail] Email sent successfully, updating local state')
       // Update local state
       setContactCampaigns(prev => prev.map(item => item.id === email.contact_campaign_id 
         ? { ...item, stage: 'sent', emails: item.emails?.map(e => e.id === email.id ? { ...e, approved: true, sent_at: result.sent_at } : e) } 
@@ -267,19 +496,42 @@ export default function CampaignDetailPage() {
       setSuccessMessage(`Email sent to ${cc.contact?.first_name}!`)
       setTimeout(() => setSuccessMessage(null), 3000)
     } catch (err: any) {
+      console.error('[handleSendEmail] Error:', err)
       setError(err.message || 'Failed to send email')
     }
   }
 
-  const handleRegenerateDraft = async (contactId: string) => {
+  const handleRegenerateDraft = async (contactId: string, senderId?: string) => {
+    console.log('[handleRegenerateDraft] Starting...', { contactId, senderId, campaignId })
     setError(null)
     try {
-      await generateDraft({ contact_id: contactId, campaign_id: campaignId, signature: 'Best regards,\nAstant Global Management' })
-      const { data: updatedCc } = await supabase.from('contact_campaigns').select(`*, contact:contacts (*), emails:emails (*)`).eq('campaign_id', campaignId)
+      // Delete existing emails for this contact in this campaign first
+      const cc = contactCampaigns.find(c => c.contact_id === contactId)
+      console.log('[handleRegenerateDraft] Found existing CC:', cc?.id, 'with', cc?.emails?.length, 'emails')
+      if (cc?.emails) {
+        console.log('[handleRegenerateDraft] Deleting existing emails...')
+        for (const email of cc.emails) {
+          const { error } = await supabase.from('emails').delete().eq('id', email.id)
+          if (error) console.error('[handleRegenerateDraft] Error deleting email:', email.id, error)
+        }
+      }
+      
+      console.log('[handleRegenerateDraft] Calling generateDraft...')
+      await generateDraft({ 
+        contact_id: contactId, 
+        campaign_id: campaignId, 
+        signature: 'Best regards,\nAstant Global Management',
+        config: senderId ? { sender_id: senderId } : undefined
+      })
+      console.log('[handleRegenerateDraft] Draft generated, refreshing CCs...')
+      const { data: updatedCc, error: fetchError } = await supabase.from('contact_campaigns').select(`*, contact:contacts (*), emails:emails (*)`).eq('campaign_id', campaignId).order('updated_at', { ascending: true })
+      if (fetchError) console.error('[handleRegenerateDraft] Error fetching updated CCs:', fetchError)
+      console.log('[handleRegenerateDraft] Updated CCs:', updatedCc?.length)
       setContactCampaigns(updatedCc || [])
       setSuccessMessage('Draft regenerated!')
       setTimeout(() => setSuccessMessage(null), 2000)
     } catch (err: any) {
+      console.error('[handleRegenerateDraft] Error:', err)
       setError(err.message || 'Failed to regenerate draft')
     }
   }
@@ -302,6 +554,7 @@ export default function CampaignDetailPage() {
         .from('contact_campaigns')
         .select(`*, contact:contacts (*), emails:emails (*)`)
         .eq('campaign_id', campaignId)
+        .order('updated_at', { ascending: true })
       setContactCampaigns(updatedCc || [])
     } catch (err) {
       console.error('Failed to refresh stats:', err)
@@ -371,7 +624,106 @@ export default function CampaignDetailPage() {
         </div>
 
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-          <div className="px-6 py-4 border-b border-gray-200 bg-gray-50"><h2 className="text-sm font-semibold text-gray-900 uppercase tracking-wider">Email Drafts</h2></div>
+          <div className="px-6 py-4 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-gray-900 uppercase tracking-wider">Email Drafts</h2>
+            
+            {/* Format Sync Controls */}
+            {contactCampaigns.length >= 1 && (
+              <div className="flex items-center space-x-3">
+                {savedFormat && (
+                  <button
+                    onClick={async () => {
+                      setIsApplyingFormat(true)
+                      console.log('[ApplyFormat] Syncing format to all emails...')
+                      
+                      try {
+                        // Use the sync-format API to apply structural changes
+                        const response = await fetch('/api/sync-format', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            campaignId,
+                            sourceEmailId: savedFormat.savedFromEmail,
+                            sourceBody: savedFormat.templateBody,
+                          })
+                        })
+                        
+                        const result = await response.json()
+                        
+                        if (result.success) {
+                          console.log('[ApplyFormat] Synced', result.updated, 'emails')
+                          
+                          // Refresh data from database
+                          const { data: refreshedCCs } = await supabase
+                            .from('contact_campaigns')
+                            .select(`
+                              *,
+                              contact:contacts(*),
+                              emails(*)
+                            `)
+                            .eq('campaign_id', campaignId)
+                            .order('created_at', { ascending: false })
+                          
+                          if (refreshedCCs) {
+                            setContactCampaigns(refreshedCCs.map(cc => ({
+                              ...cc,
+                              emails: cc.emails || []
+                            })))
+                          }
+                          
+                          setSuccessMessage(`Applied format to ${result.updated} emails! Structure synced, content preserved.`)
+                          setTimeout(() => setSuccessMessage(null), 4000)
+                        } else {
+                          throw new Error(result.error || 'Failed to sync format')
+                        }
+                      } catch (err: any) {
+                        console.error('[ApplyFormat] Error:', err)
+                        setError(err.message || 'Failed to apply format')
+                      } finally {
+                        setIsApplyingFormat(false)
+                      }
+                    }}
+                    disabled={isApplyingFormat}
+                    className="flex items-center space-x-2 px-3 py-1.5 bg-brand-600 text-white rounded-lg text-sm font-medium hover:bg-brand-700 transition-colors disabled:opacity-50"
+                  >
+                    {isApplyingFormat ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <span>Syncing...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="h-4 w-4" />
+                        <span>Apply Format to All</span>
+                      </>
+                    )}
+                  </button>
+                )}
+                {savedFormat && (
+                  <button 
+                    onClick={() => setSavedFormat(null)}
+                    className="text-xs text-gray-500 hover:text-gray-700"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+          
+          {/* Saved Format Info Banner */}
+          {savedFormat && (
+            <div className="px-6 py-3 bg-brand-50 border-b border-brand-100 flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <Save className="h-4 w-4 text-brand-600" />
+                <p className="text-sm text-brand-700">
+                  <strong>Format Saved:</strong> Structure from {savedFormat.savedFromContactName}'s email. 
+                  Clicking "Apply" will sync line breaks and spacing to all emails (content stays unique).
+                </p>
+              </div>
+            </div>
+          )}
+          
           {contactCampaigns.length === 0 ? (
             <div className="text-center py-16">
               <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4"><Mail className="h-8 w-8 text-gray-400" /></div>
@@ -383,7 +735,30 @@ export default function CampaignDetailPage() {
             <div className="p-4 space-y-3">
               {contactCampaigns.map((cc) => {
                 const email = cc.emails?.[0]
-                if (!email) return null
+                if (!email) {
+                  // Show placeholder for contacts without generated emails
+                  return (
+                    <div key={cc.id} className="bg-gray-50 rounded-lg border border-gray-200 p-4 flex items-center justify-between">
+                      <div className="flex items-center space-x-3">
+                        <div className="w-10 h-10 bg-gray-200 rounded-full flex items-center justify-center">
+                          <span className="text-gray-500 font-semibold text-sm">
+                            {cc.contact?.first_name?.[0] || '?'}{cc.contact?.last_name?.[0] || ''}
+                          </span>
+                        </div>
+                        <div>
+                          <p className="font-medium text-gray-700">{cc.contact?.first_name} {cc.contact?.last_name}</p>
+                          <p className="text-sm text-gray-500">No draft generated yet</p>
+                        </div>
+                      </div>
+                      <button 
+                        onClick={() => handleRegenerateDraft(cc.contact_id)}
+                        className="px-3 py-1.5 bg-brand-600 text-white text-sm rounded-lg hover:bg-brand-700"
+                      >
+                        Generate Draft
+                      </button>
+                    </div>
+                  )
+                }
                 const isSent = cc.stage === 'sent'
                 const isApproved = cc.stage === 'approved' || email?.approved
                 return (
@@ -397,10 +772,40 @@ export default function CampaignDetailPage() {
                     isApproved={!!isApproved}
                     isSent={isSent}
                     onApprove={async () => handleApproveEmail(email)}
+                    onUnapprove={async () => handleUnapproveEmail(email)}
                     onSend={async () => handleSendEmail(email, cc)}
                     onSave={async (updates) => handleSaveEmail(email.id, updates)}
-                    onRegenerate={async () => handleRegenerateDraft(cc.contact_id)}
+                    onRegenerate={async (senderId?: string) => handleRegenerateDraft(cc.contact_id, senderId)}
                     onDelete={() => handleDeleteContact(cc.id, `${cc.contact?.first_name} ${cc.contact?.last_name}`)}
+                    onSaveFormat={(format) => {
+                      console.log('[CampaignPage] Saving format from email (structure only, not content)...')
+                      
+                      // Build email body from format data
+                      const emailBody: EmailJsonBody = {
+                        greeting: format.bodyStructure.greeting,
+                        context_p1: format.bodyStructure.context_p1,
+                        value_p2: format.bodyStructure.value_p2,
+                        cta: format.bodyStructure.cta,
+                        bannerEnabled: format.bannerEnabled,
+                        signatureMemberId: format.signatureMemberId,
+                        signature: format.signature,
+                      }
+                      
+                      console.log('[CampaignPage] Format saved - will use AI to transfer structure to other emails')
+                      
+                      // Save format with metadata (not placeholders - actual content for AI to learn from)
+                      setSavedFormat({
+                        templateBody: emailBody,
+                        templateHtml: format.htmlContent,
+                        bannerEnabled: format.bannerEnabled,
+                        savedFromEmail: email.id,
+                        savedFromContactName: cc.contact?.first_name || 'Unknown',
+                        savedAt: new Date().toISOString(),
+                      })
+                      
+                      setSuccessMessage('Format saved! Click "Apply Format to All" to reformat other emails with AI (content preserved).')
+                      setTimeout(() => setSuccessMessage(null), 4000)
+                    }}
                   />
                 )
               })}

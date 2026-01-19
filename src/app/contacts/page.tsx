@@ -20,8 +20,8 @@ import { formatDate } from '@/lib/utils'
 import { formatCellValue } from '@/lib/spreadsheet-parser'
 import ImportContactsModal from '@/components/import-contacts-modal'
 
-// Demo data
-const DEMO_LISTS: (ContactList & { contacts: Contact[] })[] = [
+// Demo data - only shown in development when no real data exists
+const DEMO_LISTS: (ContactList & { contacts: Contact[] })[] = process.env.NODE_ENV === 'development' ? [
   {
     id: 'demo-list-1',
     name: 'Q1 2026 VC Targets',
@@ -88,7 +88,7 @@ const DEMO_LISTS: (ContactList & { contacts: Contact[] })[] = [
       },
     ],
   },
-]
+] : []
 
 export default function ContactsPage() {
   const [lists, setLists] = useState<(ContactList & { contacts: Contact[] })[]>([])
@@ -113,9 +113,11 @@ export default function ContactsPage() {
   }
 
   const fetchData = async () => {
+    console.log('[ContactsPage] fetchData starting...')
     setIsLoading(true)
     try {
       // Fetch contact lists with their contacts
+      console.log('[ContactsPage] Fetching contact lists from Supabase...')
       const { data: listsData, error: listsError } = await supabase
         .from('contact_lists')
         .select(`
@@ -125,28 +127,36 @@ export default function ContactsPage() {
         .order('created_at', { ascending: false })
 
       if (listsError) {
-        console.log('Using demo data:', listsError.message)
+        console.log('[ContactsPage] DB error, using demo data:', listsError.message)
         setLists(filterDeletedDemoLists(DEMO_LISTS))
       } else if (listsData && listsData.length > 0) {
+        console.log('[ContactsPage] Found', listsData.length, 'contact lists')
         setLists(listsData as (ContactList & { contacts: Contact[] })[])
       } else {
+        console.log('[ContactsPage] No lists found, using demo data')
         setLists(filterDeletedDemoLists(DEMO_LISTS))
       }
 
       // Fetch manual contacts (no list)
-      const { data: manualData } = await supabase
+      console.log('[ContactsPage] Fetching manual contacts...')
+      const { data: manualData, error: manualError } = await supabase
         .from('contacts')
         .select('*')
         .is('contact_list_id', null)
         .order('created_at', { ascending: false })
 
-      if (manualData) {
+      if (manualError) {
+        console.error('[ContactsPage] Error fetching manual contacts:', manualError)
+      } else if (manualData) {
+        console.log('[ContactsPage] Found', manualData.length, 'manual contacts')
         setManualContacts(manualData)
       }
-    } catch {
+    } catch (err) {
+      console.error('[ContactsPage] fetchData error:', err)
       setLists(filterDeletedDemoLists(DEMO_LISTS))
     } finally {
       setIsLoading(false)
+      console.log('[ContactsPage] fetchData completed')
     }
   }
 
@@ -180,17 +190,22 @@ export default function ContactsPage() {
           deletedIds.push(listId)
           localStorage.setItem('deleted_demo_lists', JSON.stringify(deletedIds))
         }
+        console.log('[ContactsPage] Demo list marked as deleted:', listId)
       } else {
         // For real lists, delete from database
+        console.log('[ContactsPage] Deleting list from database:', listId)
         // First delete all contacts in this list
-        await supabase.from('contacts').delete().eq('contact_list_id', listId)
+        const { error: contactsError } = await supabase.from('contacts').delete().eq('contact_list_id', listId)
+        if (contactsError) console.error('[ContactsPage] Error deleting contacts:', contactsError)
         // Then delete the list
-        await supabase.from('contact_lists').delete().eq('id', listId)
+        const { error: listError } = await supabase.from('contact_lists').delete().eq('id', listId)
+        if (listError) console.error('[ContactsPage] Error deleting list:', listError)
       }
       // Always update local state (handles both demo and real data)
       setLists(prev => prev.filter(l => l.id !== listId))
+      console.log('[ContactsPage] List deleted successfully')
     } catch (err) {
-      console.error('Failed to delete list:', err)
+      console.error('[ContactsPage] Failed to delete list:', err)
       alert('Failed to delete list. Please try again.')
     }
   }

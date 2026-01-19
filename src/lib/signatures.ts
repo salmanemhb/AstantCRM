@@ -2,6 +2,14 @@
 // TEAM SIGNATURES - ASTANT GLOBAL MANAGEMENT
 // ============================================
 
+// Supabase project configuration - SINGLE SOURCE OF TRUTH
+// This should match your Supabase project URL
+export const SUPABASE_PROJECT_ID = 'ezqltihevxrloucssqjf'
+
+// Logo hosted on Supabase storage for reliable email delivery
+// Run POST /api/upload-logo to upload the logo first
+const LOGO_URL = `https://${SUPABASE_PROJECT_ID}.supabase.co/storage/v1/object/public/public-assets/astant-logo.jpg`
+
 export interface TeamMember {
   id: string
   name: string
@@ -16,7 +24,7 @@ export const TEAM_MEMBERS: TeamMember[] = [
     id: 'jean-francois',
     name: 'Jean-François Manigo Gilardoni',
     firstName: 'Jean-François',
-    title: 'Investor Relations Associate',
+    title: 'Global Partnerships & Expansion Lead',
     email: 'jean.francois@astantglobal.com',
   },
   {
@@ -33,6 +41,20 @@ export const TEAM_MEMBERS: TeamMember[] = [
     title: 'Chief Executive Officer & Co-Founder',
     email: 'marcos.agustin@astantglobal.com',
   },
+  {
+    id: 'ana',
+    name: 'Ana Birkenfeld',
+    firstName: 'Ana',
+    title: 'Investment Analyst',
+    email: 'ana.birkenfeld@astantglobal.com',
+  },
+  {
+    id: 'miguel',
+    name: 'Miguel Eugene',
+    firstName: 'Miguel',
+    title: 'Investment Analyst',
+    email: 'miguel.eugene@astantglobal.com',
+  },
 ]
 
 export const COMPANY_INFO = {
@@ -42,6 +64,10 @@ export const COMPANY_INFO = {
   country: 'Spain',
   website: 'www.astantglobal.com',
   logoUrl: '/astant-logo.jpg',
+  // For email HTML - using Supabase hosted URL for reliable delivery
+  logoUrlAbsolute: LOGO_URL,
+  // LinkedIn-style blue color for branding
+  brandColor: '#0066cc',
 }
 
 export function getSignatureText(memberId: string): string {
@@ -58,31 +84,72 @@ ${member.email}
 ${COMPANY_INFO.website}`
 }
 
-export function getSignatureHtml(memberId: string): string {
+export function getSignatureHtml(memberId: string, useAbsoluteUrl = true): string {
   const member = TEAM_MEMBERS.find(m => m.id === memberId)
   if (!member) return ''
   
+  const logoUrl = useAbsoluteUrl ? COMPANY_INFO.logoUrlAbsolute : COMPANY_INFO.logoUrl
+  const brandColor = COMPANY_INFO.brandColor || '#0066cc'
+  
+  // Professional HTML signature optimized for ALL email clients including Outlook
+  // Outlook uses Word's rendering engine which requires:
+  // - Explicit width AND height on images (no "auto")
+  // - No max-width CSS (use width attribute instead)
+  // - Tables for layout (no divs)
   return `
-<table cellpadding="0" cellspacing="0" style="font-family: Arial, sans-serif; font-size: 14px; color: #333;">
+<!--[if mso]>
+<table cellpadding="0" cellspacing="0" border="0" width="400">
+<tr><td>
+<![endif]-->
+<table cellpadding="0" cellspacing="0" border="0" style="font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #333333; border-collapse: collapse;" width="400">
   <tr>
-    <td style="padding-right: 15px; border-right: 2px solid #0066cc;">
-      <img src="${COMPANY_INFO.logoUrl}" alt="Astant Global Management" style="width: 80px; height: auto;" />
+    <td valign="top" width="85" style="padding-right: 15px; border-right: 3px solid ${brandColor};">
+      <a href="https://${COMPANY_INFO.website}" target="_blank" style="text-decoration: none;">
+        <img src="${logoUrl}" alt="Astant" width="70" height="70" style="display: block; border: 0; width: 70px; height: 70px;" />
+      </a>
     </td>
-    <td style="padding-left: 15px;">
-      <p style="margin: 0; font-weight: bold; font-size: 15px; color: #1a1a1a;">${member.name}</p>
-      <p style="margin: 4px 0 8px 0; font-size: 13px; color: #666;">${member.title}</p>
-      <p style="margin: 0; font-size: 13px; color: #333; font-weight: 600;">${COMPANY_INFO.name}</p>
-      <p style="margin: 2px 0; font-size: 12px; color: #666;">${COMPANY_INFO.address}</p>
-      <p style="margin: 2px 0; font-size: 12px; color: #666;">${COMPANY_INFO.city}, ${COMPANY_INFO.country}</p>
-      <p style="margin: 8px 0 0 0;">
-        <a href="mailto:${member.email}" style="color: #0066cc; text-decoration: none; font-size: 12px;">${member.email}</a>
-        <span style="color: #ccc; margin: 0 8px;">|</span>
-        <a href="https://${COMPANY_INFO.website}" style="color: #0066cc; text-decoration: none; font-size: 12px;">${COMPANY_INFO.website}</a>
-      </p>
+    <td valign="top" style="padding-left: 15px;">
+      <table cellpadding="0" cellspacing="0" border="0">
+        <tr>
+          <td style="padding-bottom: 3px;">
+            <span style="font-size: 16px; font-weight: bold; color: #1a1a1a;">${member.name}</span>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding-bottom: 10px;">
+            <span style="font-size: 13px; color: #666666;">${member.title}</span>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding-bottom: 2px;">
+            <span style="font-size: 13px; font-weight: 600; color: #333333;">${COMPANY_INFO.name}</span>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding-bottom: 2px;">
+            <span style="font-size: 12px; color: #666666;">${COMPANY_INFO.address}</span>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding-bottom: 8px;">
+            <span style="font-size: 12px; color: #666666;">${COMPANY_INFO.city}, ${COMPANY_INFO.country}</span>
+          </td>
+        </tr>
+        <tr>
+          <td>
+            <a href="mailto:${member.email}" style="color: ${brandColor}; text-decoration: none; font-size: 12px;">${member.email}</a>
+            <span style="color: #cccccc; margin: 0 6px;">|</span>
+            <a href="https://${COMPANY_INFO.website}" style="color: ${brandColor}; text-decoration: none; font-size: 12px;">${COMPANY_INFO.website}</a>
+          </td>
+        </tr>
+      </table>
     </td>
   </tr>
 </table>
-  `.trim()
+<!--[if mso]>
+</td></tr>
+</table>
+<![endif]-->`.trim()
 }
 
 export function getMemberById(id: string): TeamMember | undefined {

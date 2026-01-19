@@ -1,11 +1,13 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useEditor, EditorContent, Editor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Link from '@tiptap/extension-link'
 import Placeholder from '@tiptap/extension-placeholder'
 import Underline from '@tiptap/extension-underline'
+import DOMPurify from 'dompurify'
+import { createClient } from '@/lib/supabase/client'
 import {
   Send,
   Trash2,
@@ -30,12 +32,17 @@ import {
   Settings,
   Paperclip,
   FileText,
-  Image,
+  Image as ImageIcon,
   File,
-  XCircle
+  XCircle,
+  ToggleLeft,
+  ToggleRight,
+  Edit
 } from 'lucide-react'
 import type { Email, EmailJsonBody, EmailAttachment } from '@/lib/types'
 import { TEAM_MEMBERS, COMPANY_INFO, getSignatureText, getSignatureHtml, getMemberById } from '@/lib/signatures'
+import { DEFAULT_BANNER, BANNER_URL, type EmailBanner } from '@/lib/email-formatting'
+import { updateSenderInBody } from '@/lib/template-utils'
 
 // Attachment type for local state
 interface LocalAttachment {
@@ -58,13 +65,23 @@ function formatFileSize(bytes: number): string {
 
 // Get icon for file type
 function getFileIcon(type: string) {
-  if (type.startsWith('image/')) return Image
+  if (type.startsWith('image/')) return ImageIcon
   if (type.includes('pdf')) return FileText
   return File
 }
 
 // Formatting Toolbar Component
-function FormattingToolbar({ editor, onAttach }: { editor: Editor | null; onAttach: () => void }) {
+function FormattingToolbar({ 
+  editor, 
+  onAttach,
+  bannerEnabled,
+  onToggleBanner
+}: { 
+  editor: Editor | null
+  onAttach: () => void
+  bannerEnabled: boolean
+  onToggleBanner: () => void
+}) {
   const [showLinkInput, setShowLinkInput] = useState(false)
   const [linkUrl, setLinkUrl] = useState('')
   const [linkText, setLinkText] = useState('')
@@ -185,6 +202,25 @@ function FormattingToolbar({ editor, onAttach }: { editor: Editor | null; onAtta
         title="Attach File"
       >
         <Paperclip className="h-4 w-4" />
+      </button>
+      
+      {/* Banner Toggle Button */}
+      <button
+        onClick={onToggleBanner}
+        className={`flex items-center space-x-1 px-2 py-1 rounded transition-colors ${
+          bannerEnabled 
+            ? 'bg-brand-100 text-brand-700 hover:bg-brand-200' 
+            : 'text-gray-500 hover:bg-gray-200'
+        }`}
+        title={bannerEnabled ? 'Banner: ON (click to disable)' : 'Banner: OFF (click to enable)'}
+      >
+        <ImageIcon className="h-4 w-4" />
+        <span className="text-xs font-medium">Banner</span>
+        {bannerEnabled ? (
+          <ToggleRight className="h-4 w-4" />
+        ) : (
+          <ToggleLeft className="h-4 w-4" />
+        )}
       </button>
       
       {/* Link Input Popup */}
@@ -349,10 +385,13 @@ function EmailPreviewModal({
             </div>
           </div>
           
-          {/* Email Body */}
+          {/* Email Body - Sanitized to prevent XSS */}
           <div 
             className="prose prose-sm max-w-none"
-            dangerouslySetInnerHTML={{ __html: bodyHtml }}
+            dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(bodyHtml, { 
+              ALLOWED_TAGS: ['p', 'br', 'b', 'strong', 'i', 'em', 'u', 'a', 'ul', 'ol', 'li', 'span', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote'],
+              ALLOWED_ATTR: ['href', 'target', 'rel', 'class']
+            }) }}
           />
           
           {/* Signature */}
@@ -425,10 +464,30 @@ interface GmailEmailComposerProps {
   isApproved: boolean
   isSent: boolean
   onApprove: () => Promise<void>
+  onUnapprove: () => Promise<void>  // Un-approve to enable editing
   onSend: () => Promise<void>
   onSave: (updates: Partial<Email>) => Promise<void>
-  onRegenerate: () => Promise<void>
+  onRegenerate: (senderId?: string) => Promise<void>
   onDelete: () => void
+  // Format template callback - saves structure AND settings for template application
+  onSaveFormat?: (format: { 
+    bannerEnabled: boolean
+    signatureMemberId: string
+    signature: string
+    // HTML content from editor (for structure/formatting)
+    htmlContent: string
+    // Body structure fields
+    bodyStructure: {
+      greeting: string
+      context_p1: string
+      value_p2: string
+      cta: string
+    }
+    // Source info for intelligent replacement when applying
+    sourceContactName: string
+    sourceContactFirm: string
+    sourceSenderName: string
+  }) => void
 }
 
 export default function GmailEmailComposer({
@@ -440,10 +499,12 @@ export default function GmailEmailComposer({
   isApproved,
   isSent,
   onApprove,
+  onUnapprove,
   onSend,
   onSave,
   onRegenerate,
-  onDelete
+  onDelete,
+  onSaveFormat
 }: GmailEmailComposerProps) {
   const [isExpanded, setIsExpanded] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
@@ -455,9 +516,42 @@ export default function GmailEmailComposer({
   const [showPreview, setShowPreview] = useState(false)
   const [hasChanges, setHasChanges] = useState(false)
   
+  // Frozen state - email is frozen (non-editable) when approved or sent
+  const isFrozen = isApproved || isSent
+  
+  // Banner state - initialize from saved email body
+  const [bannerEnabled, setBannerEnabled] = useState(() => {
+    const body = email.current_body || email.original_body
+    return body?.bannerEnabled || false
+  })
+  
   // Attachments state
   const [attachments, setAttachments] = useState<LocalAttachment[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
+  
+  // Load attachments from database on mount
+  useEffect(() => {
+    async function loadAttachments() {
+      const supabase = createClient()
+      const { data } = await supabase
+        .from('email_attachments')
+        .select('*')
+        .eq('email_id', email.id)
+      
+      if (data && data.length > 0) {
+        setAttachments(data.map(att => ({
+          id: att.id,
+          file: null as any, // Already uploaded
+          file_name: att.file_name,
+          file_size: att.file_size,
+          file_type: att.file_type,
+          storage_path: att.storage_path,
+          uploading: false,
+        })))
+      }
+    }
+    loadAttachments()
+  }, [email.id])
   
   // Email state
   const [subject, setSubject] = useState(email.subject)
@@ -553,6 +647,17 @@ export default function GmailEmailComposer({
     const body = email.current_body || email.original_body
     if (!body) return ''
     
+    // Helper to convert text with line breaks to proper HTML paragraphs
+    const textToHtml = (text: string) => {
+      if (!text) return ''
+      // Split by double newlines for paragraphs, preserve single newlines as <br>
+      return text
+        .split(/\n\n+/)
+        .filter(p => p.trim())
+        .map(p => `<p>${p.replace(/\n/g, '<br/>')}</p>`)
+        .join('')
+    }
+    
     const parts = [
       body.greeting,
       body.context_p1,
@@ -560,7 +665,7 @@ export default function GmailEmailComposer({
       body.cta
     ].filter(Boolean)
     
-    return parts.map(p => `<p>${p}</p>`).join('')
+    return parts.map(p => textToHtml(p)).join('')
   }, [email])
 
   // TipTap editor for the main email body
@@ -579,41 +684,90 @@ export default function GmailEmailComposer({
       }),
     ],
     content: getEmailBodyHtml(),
-    editable: !isSent,
+    editable: !isFrozen, // Frozen when approved or sent
     immediatelyRender: false,
     onUpdate: () => {
       setHasChanges(true)
     },
   })
+  
+  // Update editor editability when frozen state changes
+  useEffect(() => {
+    if (editor) {
+      editor.setEditable(!isFrozen)
+    }
+  }, [editor, isFrozen])
+
+  // Cleanup editor on unmount to prevent memory leaks
+  useEffect(() => {
+    return () => {
+      editor?.destroy()
+    }
+  }, [editor])
 
   // Update editor content when email changes
   useEffect(() => {
-    if (editor && !hasChanges) {
-      editor.commands.setContent(getEmailBodyHtml())
+    if (editor) {
+      // Always update when email ID or body changes (e.g., after regeneration)
+      const newContent = getEmailBodyHtml()
+      const currentContent = editor.getHTML()
+      
+      // Only update if content is actually different
+      if (newContent !== currentContent) {
+        editor.commands.setContent(newContent)
+        setHasChanges(false)
+        
+        // Also update signature member from the new email
+        const body = email.current_body || email.original_body
+        if (body?.signatureMemberId) {
+          setSignatureMemberId(body.signatureMemberId)
+        }
+      }
     }
-  }, [email, editor, getEmailBodyHtml, hasChanges])
+  }, [email.id, email.current_body, email.original_body, editor, getEmailBodyHtml])
+
+  // Sync when the email body changes from external source (database update via Apply Format to All)
+  // Use a key based on email body to force re-sync
+  const emailBodyKey = JSON.stringify({
+    bannerEnabled: (email.current_body || email.original_body)?.bannerEnabled,
+    signatureMemberId: (email.current_body || email.original_body)?.signatureMemberId
+  })
+  
+  useEffect(() => {
+    const body = email.current_body || email.original_body
+    if (body) {
+      // Always sync from props - this ensures Apply Format to All works
+      if (body.bannerEnabled !== undefined) {
+        setBannerEnabled(body.bannerEnabled)
+      }
+      if (body.signatureMemberId) {
+        setSignatureMemberId(body.signatureMemberId)
+      }
+    }
+  }, [emailBodyKey]) // Use serialized key to detect changes
 
   const handleSave = async () => {
     if (!editor) return
     setIsSaving(true)
     
     try {
-      // Get the HTML content and convert to plain text for storage
+      // Get the HTML content - preserve formatting (bold, italic, etc.)
       const htmlContent = editor.getHTML()
       
-      // Parse paragraphs from HTML
+      // Parse paragraphs from HTML, preserving inner HTML (including <strong>, <em>, etc.)
       const tempDiv = document.createElement('div')
       tempDiv.innerHTML = htmlContent
-      const paragraphs = Array.from(tempDiv.querySelectorAll('p')).map(p => p.textContent || '')
+      const paragraphs = Array.from(tempDiv.querySelectorAll('p')).map(p => p.innerHTML || '')
       
-      // Build the body structure
+      // Build the body structure - HTML content will be preserved
       const updatedBody: EmailJsonBody = {
         greeting: paragraphs[0] || '',
         context_p1: paragraphs[1] || '',
         value_p2: paragraphs[2] || '',
         cta: paragraphs.slice(3).join('\n\n') || '',
         signature: getSignatureText(signatureMemberId),
-        signatureMemberId: signatureMemberId
+        signatureMemberId: signatureMemberId,
+        bannerEnabled: bannerEnabled
       }
       
       await onSave({
@@ -625,6 +779,62 @@ export default function GmailEmailComposer({
     } finally {
       setIsSaving(false)
     }
+  }
+
+  // Save format as template - saves structure, formatting, AND settings
+  // When applied to other emails, the structure is used but personalized values are swapped
+  const handleSaveFormatAsTemplate = () => {
+    console.log('[handleSaveFormatAsTemplate] Called, onSaveFormat:', !!onSaveFormat)
+    
+    if (!onSaveFormat) {
+      console.error('[handleSaveFormatAsTemplate] onSaveFormat callback is not provided')
+      return
+    }
+    
+    if (!editor) {
+      console.error('[handleSaveFormatAsTemplate] Editor not available')
+      return
+    }
+    
+    // Get the HTML content from editor
+    const htmlContent = editor.getHTML()
+    
+    // Parse paragraphs from HTML to build body structure
+    const tempDiv = document.createElement('div')
+    tempDiv.innerHTML = htmlContent
+    const paragraphs = Array.from(tempDiv.querySelectorAll('p')).map(p => p.innerHTML || '')
+    
+    // Build the body structure
+    const bodyStructure = {
+      greeting: paragraphs[0] || '',
+      context_p1: paragraphs[1] || '',
+      value_p2: paragraphs[2] || '',
+      cta: paragraphs.slice(3).join('\n\n') || ''
+    }
+    
+    // Get sender's first name
+    const senderMember = getMemberById(signatureMemberId)
+    const sourceSenderName = senderMember?.firstName || senderMember?.name?.split(' ')[0] || ''
+    
+    console.log('[handleSaveFormatAsTemplate] Saving full structure:', { 
+      bannerEnabled, 
+      signatureMemberId,
+      contactName,
+      contactFirm,
+      sourceSenderName,
+      bodyStructure
+    })
+    
+    onSaveFormat({
+      bannerEnabled,
+      signatureMemberId,
+      signature: getSignatureText(signatureMemberId),
+      htmlContent,
+      bodyStructure,
+      sourceContactName: contactName,
+      sourceContactFirm: contactFirm || '',
+      sourceSenderName
+    })
   }
 
   const handleSend = async () => {
@@ -767,7 +977,54 @@ export default function GmailEmailComposer({
           </div>
 
           {/* Formatting Toolbar */}
-          {!isSent && <FormattingToolbar editor={editor} onAttach={() => fileInputRef.current?.click()} />}
+          {!isSent && (
+            <FormattingToolbar 
+              editor={editor} 
+              onAttach={() => fileInputRef.current?.click()}
+              bannerEnabled={bannerEnabled}
+              onToggleBanner={() => {
+                setBannerEnabled(!bannerEnabled)
+                setHasChanges(true)
+              }}
+            />
+          )}
+          
+          {/* Banner Preview (when enabled) */}
+          {bannerEnabled && (
+            <div className="mx-4 mt-3 p-3 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border border-blue-200">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-3">
+                  <div className="h-8 w-8 rounded bg-brand-100 flex items-center justify-center">
+                    <ImageIcon className="h-4 w-4 text-brand-600" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-gray-900">Email Banner Enabled</p>
+                    <p className="text-xs text-gray-500">Astant banner will appear at the top of the email</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setBannerEnabled(false)}
+                  className="text-xs text-gray-500 hover:text-gray-700 px-2 py-1 rounded hover:bg-white/50"
+                >
+                  Remove
+                </button>
+              </div>
+            </div>
+          )}
+          
+          {/* Save Format as Template Button */}
+          {onSaveFormat && (
+            <div className="mx-4 mt-3">
+              <button
+                onClick={handleSaveFormatAsTemplate}
+                className="flex items-center space-x-1.5 px-3 py-1.5 text-xs text-gray-600 hover:text-brand-600 hover:bg-brand-50 rounded-lg border border-gray-200 hover:border-brand-200 transition-colors"
+                title="Save this email's format (banner, signature) as a template to apply to all emails"
+              >
+                <Copy className="h-3.5 w-3.5" />
+                <span>Save Format as Template</span>
+              </button>
+            </div>
+          )}
           
           {/* Hidden file input */}
           <input
@@ -783,7 +1040,7 @@ export default function GmailEmailComposer({
           <div className="min-h-[300px]">
             <EditorContent 
               editor={editor} 
-              className="prose prose-sm max-w-none px-4 py-4 min-h-[250px] focus:outline-none [&_.ProseMirror]:min-h-[250px] [&_.ProseMirror]:focus:outline-none [&_.ProseMirror_p]:my-3"
+              className="prose prose-sm max-w-none px-4 py-4 min-h-[250px] focus:outline-none [&_.ProseMirror]:min-h-[250px] [&_.ProseMirror]:focus:outline-none [&_.ProseMirror_p]:my-3 [&_.ProseMirror_p]:text-justify"
             />
             
             {/* Attachments Display */}
@@ -828,18 +1085,24 @@ export default function GmailEmailComposer({
             {/* Signature Display with Logo */}
             <div className="px-4 py-4 border-t border-gray-100 bg-gray-50">
               <div className="flex items-start space-x-4">
-                <img 
-                  src={COMPANY_INFO.logoUrl} 
-                  alt="Astant Global Management" 
-                  className="w-14 h-auto object-contain"
-                />
+                <div className="flex-shrink-0 border-r-[3px] border-brand-600 pr-4">
+                  <img 
+                    src={COMPANY_INFO.logoUrl} 
+                    alt="Astant" 
+                    className="w-[70px] h-auto object-contain"
+                    onError={(e) => {
+                      // Fallback if image doesn't load
+                      e.currentTarget.style.display = 'none'
+                    }}
+                  />
+                </div>
                 <div className="text-sm">
-                  <p className="font-semibold text-gray-900">{getMemberById(signatureMemberId)?.name}</p>
-                  <p className="text-gray-600 text-xs">{getMemberById(signatureMemberId)?.title}</p>
-                  <p className="text-gray-700 font-medium text-xs mt-2">{COMPANY_INFO.name}</p>
+                  <p className="font-bold text-gray-900 text-base">{getMemberById(signatureMemberId)?.name}</p>
+                  <p className="text-gray-500 text-sm mb-2">{getMemberById(signatureMemberId)?.title}</p>
+                  <p className="text-gray-700 font-semibold text-sm">{COMPANY_INFO.name}</p>
                   <p className="text-gray-500 text-xs">{COMPANY_INFO.address}</p>
-                  <p className="text-gray-500 text-xs">{COMPANY_INFO.city}, {COMPANY_INFO.country}</p>
-                  <div className="mt-2 flex items-center space-x-2 text-xs">
+                  <p className="text-gray-500 text-xs mb-2">{COMPANY_INFO.city}, {COMPANY_INFO.country}</p>
+                  <div className="flex items-center space-x-2 text-xs">
                     <a href={`mailto:${getMemberById(signatureMemberId)?.email}`} className="text-brand-600 hover:underline">
                       {getMemberById(signatureMemberId)?.email}
                     </a>
@@ -853,13 +1116,99 @@ export default function GmailEmailComposer({
             </div>
           </div>
 
-          {/* Sender Selector */}
-          {!isSent && (
+          {/* Sender Selector - Only shown when not frozen */}
+          {!isFrozen && (
             <TeamSignatureDisplay
               memberId={signatureMemberId}
-              onChangeMember={(id) => {
+              onChangeMember={async (id) => {
+                const oldSenderId = signatureMemberId
+                console.log('[SenderChange] ===== SENDER CHANGE START =====')
+                console.log('[SenderChange] Changing sender from', oldSenderId, 'to:', id)
+                
+                // Get sender info
+                const oldSender = getMemberById(oldSenderId)
+                const newSender = getMemberById(id)
+                console.log('[SenderChange] Old sender name:', oldSender?.firstName)
+                console.log('[SenderChange] New sender name:', newSender?.firstName)
+                
                 setSignatureMemberId(id)
                 setHasChanges(true)
+                
+                // Get current body
+                const currentBody = email.current_body || email.original_body
+                const newSignature = getSignatureText(id)
+                
+                // Build updated body
+                let updatedBody: EmailJsonBody
+                
+                if (editor) {
+                  // Get current content from editor - PRESERVE HTML FORMATTING
+                  const htmlContent = editor.getHTML()
+                  console.log('[SenderChange] Editor HTML:', htmlContent.substring(0, 200))
+                  
+                  const tempDiv = document.createElement('div')
+                  tempDiv.innerHTML = htmlContent
+                  
+                  // Extract paragraphs but PRESERVE innerHTML (keeps <strong>, <em>, etc.)
+                  const paragraphs = Array.from(tempDiv.querySelectorAll('p')).map(p => {
+                    // Use innerHTML to preserve formatting tags like <strong>, <em>, <a>
+                    return p.innerHTML || ''
+                  })
+                  
+                  console.log('[SenderChange] Paragraphs extracted with HTML:', paragraphs.map(p => p.substring(0, 80)))
+                  
+                  // Build body from editor content - HTML included
+                  const bodyFromEditor: EmailJsonBody = {
+                    greeting: paragraphs[0] || currentBody?.greeting || '',
+                    context_p1: paragraphs[1] || currentBody?.context_p1 || '',
+                    value_p2: paragraphs[2] || currentBody?.value_p2 || '',
+                    cta: paragraphs.slice(3).join('\n\n') || currentBody?.cta || '',
+                    signature: newSignature,
+                    signatureMemberId: id,
+                    bannerEnabled: bannerEnabled
+                  }
+                  
+                  console.log('[SenderChange] Body from editor - context_p1:', bodyFromEditor.context_p1?.substring(0, 80))
+                  
+                  // Update sender name in body text - uses HTML-aware replacement
+                  updatedBody = updateSenderInBody(bodyFromEditor, oldSenderId, id)
+                  updatedBody.signature = newSignature
+                  updatedBody.signatureMemberId = id
+                  
+                  console.log('[SenderChange] Updated body - context_p1:', updatedBody.context_p1?.substring(0, 80))
+                  
+                  // Update the editor content with new sender name - HTML formatting preserved
+                  const newHtml = `
+                    <p>${updatedBody.greeting || ''}</p>
+                    <p>${updatedBody.context_p1 || ''}</p>
+                    <p>${updatedBody.value_p2 || ''}</p>
+                    <p>${updatedBody.cta || ''}</p>
+                  `.trim()
+                  
+                  console.log('[SenderChange] Setting new HTML:', newHtml.substring(0, 150))
+                  editor.commands.setContent(newHtml)
+                } else {
+                  console.log('[SenderChange] No editor, using currentBody directly')
+                  const baseBody: EmailJsonBody = {
+                    ...currentBody,
+                    signature: newSignature,
+                    signatureMemberId: id
+                  }
+                  updatedBody = updateSenderInBody(baseBody, oldSenderId, id)
+                  updatedBody.signature = newSignature
+                  updatedBody.signatureMemberId = id
+                }
+                
+                // Save to database
+                try {
+                  await onSave({
+                    subject: email.subject,
+                    current_body: updatedBody
+                  })
+                  console.log('[SenderChange] ===== SAVED SUCCESSFULLY =====')
+                } catch (err) {
+                  console.error('[SenderChange] Failed to save:', err)
+                }
               }}
               isOpen={showSenderSelector}
               onToggle={() => setShowSenderSelector(!showSenderSelector)}
@@ -913,20 +1262,22 @@ export default function GmailEmailComposer({
 
               {/* Right Actions */}
               <div className="flex items-center space-x-1">
-                {/* AI Regenerate */}
-                <button
-                  onClick={handleRegenerate}
-                  disabled={isRegenerating}
-                  className="flex items-center space-x-1.5 px-3 py-2 text-sm text-gray-600 hover:bg-gray-200 rounded-lg transition-colors"
-                  title="Regenerate with AI"
-                >
-                  {isRegenerating ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Sparkles className="h-4 w-4" />
-                  )}
-                  <span className="hidden sm:inline">{isRegenerating ? 'Regenerating...' : 'AI Regenerate'}</span>
-                </button>
+                {/* AI Regenerate - only when not frozen */}
+                {!isFrozen && (
+                  <button
+                    onClick={handleRegenerate}
+                    disabled={isRegenerating}
+                    className="flex items-center space-x-1.5 px-3 py-2 text-sm text-gray-600 hover:bg-gray-200 rounded-lg transition-colors"
+                    title="Regenerate with AI"
+                  >
+                    {isRegenerating ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Sparkles className="h-4 w-4" />
+                    )}
+                    <span className="hidden sm:inline">{isRegenerating ? 'Regenerating...' : 'AI Regenerate'}</span>
+                  </button>
+                )}
 
                 {/* Copy */}
                 <button
@@ -942,7 +1293,7 @@ export default function GmailEmailComposer({
                   <span className="hidden sm:inline">{copied ? 'Copied!' : 'Copy'}</span>
                 </button>
 
-                {/* Approve */}
+                {/* Approve - shown when not approved */}
                 {!isApproved && (
                   <button
                     onClick={onApprove}
@@ -951,6 +1302,18 @@ export default function GmailEmailComposer({
                   >
                     <CheckCircle className="h-4 w-4" />
                     <span className="hidden sm:inline">Approve</span>
+                  </button>
+                )}
+                
+                {/* Edit - shown when approved (to unlock and edit) */}
+                {isApproved && !isSent && (
+                  <button
+                    onClick={onUnapprove}
+                    className="flex items-center space-x-1.5 px-3 py-2 text-sm text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
+                    title="Unlock to edit (will un-approve)"
+                  >
+                    <Edit className="h-4 w-4" />
+                    <span className="hidden sm:inline">Edit</span>
                   </button>
                 )}
 

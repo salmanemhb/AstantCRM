@@ -125,6 +125,12 @@ export default function ContactDetailPage() {
         // First delete all emails for this contact's campaigns
         const ccIds = contactCampaigns.map(cc => cc.id)
         if (ccIds.length > 0) {
+          // Get email IDs first to delete engagement_events
+          const { data: emails } = await supabase.from('emails').select('id').in('contact_campaign_id', ccIds)
+          if (emails && emails.length > 0) {
+            const emailIds = emails.map(e => e.id)
+            await supabase.from('engagement_events').delete().in('email_id', emailIds)
+          }
           await supabase.from('emails').delete().in('contact_campaign_id', ccIds)
           await supabase.from('contact_campaigns').delete().eq('contact_id', contactId)
         }

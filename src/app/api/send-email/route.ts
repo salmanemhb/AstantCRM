@@ -1,22 +1,81 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { Resend } from 'resend'
+import { TEAM_MEMBERS, COMPANY_INFO, getSignatureHtml, getMemberById } from '@/lib/signatures'
+import { getBannerHtml, type EmailBanner, DEFAULT_BANNER } from '@/lib/email-formatting'
 
-// Email provider configuration
-// Set RESEND_API_KEY in .env.local to enable actual sending
-const RESEND_API_KEY = process.env.RESEND_API_KEY
-const FROM_EMAIL = process.env.FROM_EMAIL || 'noreply@astant.io'
-const FROM_NAME = process.env.FROM_NAME || 'Astant Global Management'
+// ============================================
+// EMAIL SENDING API
+// Single + Bulk email sending with rate limiting
+// ============================================
+
+// Initialize Resend
+const resend = process.env.RESEND_API_KEY 
+  ? new Resend(process.env.RESEND_API_KEY)
+  : null
+
+// Default sender for broadcasts/general emails
+const FROM_DOMAIN = process.env.FROM_DOMAIN || 'astantglobal.com'
+const DEFAULT_FROM_EMAIL = `info@${FROM_DOMAIN}`
+const DEFAULT_FROM_NAME = COMPANY_INFO.name
+
+// Rate limiting for bulk: 10 emails/second
+const BATCH_SIZE = 10
+const BATCH_DELAY_MS = 1100
+
+// HTML escape function to prevent XSS
+function escapeHtml(text: string): string {
+  if (!text) return ''
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;')
+}
+
+// Get sender info from team members
+function getSenderFromId(senderId: string): { name: string; email: string } {
+  const member = TEAM_MEMBERS.find(m => m.id === senderId)
+  if (member) {
+    return { name: member.name, email: member.email }
+  }
+  // Default to company email for broadcasts
+  return { name: DEFAULT_FROM_NAME, email: DEFAULT_FROM_EMAIL }
+}
 
 interface SendEmailRequest {
   email_id: string
-  dry_run?: boolean // If true, don't actually send - just simulate
+  dry_run?: boolean
+}
+
+interface BulkSendRequest {
+  action: 'bulk'
+  campaign_id: string
+  email_ids?: string[]
+  filter?: 'approved' | 'all'
+  sender_id?: string
+  dry_run?: boolean
 }
 
 export async function POST(request: NextRequest) {
+  console.log('[SEND-EMAIL] === POST Request Started ===')
   try {
-    const { email_id, dry_run = false }: SendEmailRequest = await request.json()
+    const reqBody = await request.json()
+    console.log('[SEND-EMAIL] Request body:', JSON.stringify(reqBody, null, 2))
+    
+    // Check if this is a bulk operation
+    if (reqBody.action === 'bulk') {
+      console.log('[SEND-EMAIL] Handling bulk send operation')
+      return handleBulkSend(reqBody as BulkSendRequest)
+    }
+    
+    // Single email send
+    const { email_id, dry_run = false } = reqBody as SendEmailRequest
+    console.log('[SEND-EMAIL] Single email send:', { email_id, dry_run })
 
     if (!email_id) {
+      console.error('[SEND-EMAIL] Missing email_id')
       return NextResponse.json(
         { success: false, error: 'email_id is required' },
         { status: 400 }
@@ -24,6 +83,7 @@ export async function POST(request: NextRequest) {
     }
 
     const supabase = createClient()
+    console.log('[SEND-EMAIL] Fetching email data...')
 
     // Fetch email with related data
     const { data: email, error: emailError } = await supabase
@@ -40,14 +100,17 @@ export async function POST(request: NextRequest) {
       .single()
 
     if (emailError || !email) {
+      console.error('[SEND-EMAIL] Email not found:', emailError)
       return NextResponse.json(
         { success: false, error: 'Email not found' },
         { status: 404 }
       )
     }
+    console.log('[SEND-EMAIL] Email found:', { id: email.id, subject: email.subject })
 
     // Check if already sent
     if (email.sent_at) {
+      console.warn('[SEND-EMAIL] Email already sent at:', email.sent_at)
       return NextResponse.json(
         { success: false, error: 'Email already sent' },
         { status: 400 }
@@ -55,19 +118,39 @@ export async function POST(request: NextRequest) {
     }
 
     const contact = email.contact_campaign?.contact
+    const campaign = email.contact_campaign?.campaign
     const toEmail = contact?.email
+    console.log('[SEND-EMAIL] Recipient:', { contactId: contact?.id, toEmail, campaignId: campaign?.id })
 
     if (!toEmail) {
+      console.error('[SEND-EMAIL] No recipient email address found')
       return NextResponse.json(
         { success: false, error: 'No recipient email address' },
         { status: 400 }
       )
     }
 
-    // Build email content
-    const body = email.current_body || email.original_body
-    const htmlBody = buildHtmlEmail(body, contact)
-    const textBody = buildTextEmail(body)
+    // Get sender from contact_campaign or campaign
+    // PRIORITY: 1) signatureMemberId in email body (most recently selected), 
+    //           2) contact_campaign.sender_id, 
+    //           3) campaign.sender_id, 
+    //           4) default
+    const emailBody = email.current_body || email.original_body
+    const senderId = emailBody?.signatureMemberId 
+      || email.contact_campaign?.sender_id 
+      || campaign?.sender_id 
+      || 'jean-francois'
+    const sender = getSenderFromId(senderId)
+    console.log('[SEND-EMAIL] Sender:', sender, 'from signatureMemberId:', emailBody?.signatureMemberId)
+
+    // Create banner config from email body settings
+    console.log('[SEND-EMAIL] Banner enabled?', emailBody?.bannerEnabled, 'Using banner URL:', DEFAULT_BANNER.imageUrl)
+    const banner: EmailBanner | undefined = emailBody?.bannerEnabled 
+      ? { ...DEFAULT_BANNER, enabled: true }
+      : undefined
+    
+    const htmlBody = buildHtmlEmail(emailBody, contact, senderId, banner)
+    const textBody = buildTextEmail(emailBody, senderId)
 
     // Fetch attachments if any
     const { data: attachments } = await supabase
@@ -80,19 +163,32 @@ export async function POST(request: NextRequest) {
     if (dry_run) {
       // Dry run - just log what would be sent
       console.log('=== DRY RUN EMAIL ===')
+      console.log('From:', `${sender.name} <${sender.email}>`)
       console.log('To:', toEmail)
       console.log('Subject:', email.subject)
       console.log('Body preview:', textBody.substring(0, 200))
       console.log('Attachments:', attachments?.length || 0)
       messageId = `dry-run-${Date.now()}`
-    } else if (RESEND_API_KEY) {
-      // Send via Resend
+    } else if (resend) {
+      // Send via Resend SDK with proper headers for deliverability
       const resendPayload: any = {
-        from: `${FROM_NAME} <${FROM_EMAIL}>`,
+        from: `${sender.name} <${sender.email}>`,
         to: [toEmail],
         subject: email.subject,
         html: htmlBody,
         text: textBody,
+        // Reply-to ensures replies go to the sender
+        reply_to: sender.email,
+        // Headers to improve deliverability
+        headers: {
+          'X-Entity-Ref-ID': email_id,
+          'X-Mailer': 'Astant CRM',
+        },
+        // Tags for Resend analytics
+        tags: [
+          { name: 'campaign', value: campaign?.id || 'direct' },
+          { name: 'sender', value: senderId },
+        ],
       }
 
       // Add attachments if present
@@ -116,34 +212,31 @@ export async function POST(request: NextRequest) {
         ).then(atts => atts.filter(Boolean))
       }
 
-      const response = await fetch('https://api.resend.com/emails', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${RESEND_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(resendPayload),
-      })
+      const { data: sendResult, error: sendError } = await resend.emails.send(resendPayload)
 
-      if (!response.ok) {
-        const error = await response.json()
-        throw new Error(error.message || 'Failed to send via Resend')
+      if (sendError) {
+        console.error('[SEND-EMAIL] Resend API error:', sendError)
+        throw new Error(sendError.message || 'Failed to send via Resend')
       }
 
-      const result = await response.json()
-      messageId = result.id
+      console.log('[SEND-EMAIL] Resend send successful:', sendResult)
+      messageId = sendResult?.id
     } else {
       // No email provider configured - simulate send for demo
-      console.log('=== SIMULATED SEND (no RESEND_API_KEY configured) ===')
-      console.log('To:', toEmail)
-      console.log('Subject:', email.subject)
+      console.log('[SEND-EMAIL] === SIMULATED SEND (no RESEND_API_KEY configured) ===')
+      console.log('[SEND-EMAIL] To:', toEmail)
+      console.log('[SEND-EMAIL] Subject:', email.subject)
       messageId = `simulated-${Date.now()}`
     }
 
-    // Update database
+    // Update database with proper error handling
+    // Since Supabase JS client doesn't support transactions directly,
+    // we handle errors and attempt rollback if needed
     const sentAt = new Date().toISOString()
+    console.log('[SEND-EMAIL] Updating database records...', { sentAt })
 
-    await supabase
+    // Step 1: Update email record
+    const { error: emailUpdateError } = await supabase
       .from('emails')
       .update({ 
         sent_at: sentAt,
@@ -151,14 +244,47 @@ export async function POST(request: NextRequest) {
       })
       .eq('id', email_id)
 
-    await supabase
+    if (emailUpdateError) {
+      console.error('[SEND-EMAIL] Failed to update email record:', emailUpdateError)
+      return NextResponse.json(
+        { success: false, error: 'Failed to update email record: ' + emailUpdateError.message },
+        { status: 500 }
+      )
+    }
+    console.log('[SEND-EMAIL] Email record updated successfully')
+
+    // Step 2: Update contact_campaign stage
+    console.log('[SEND-EMAIL] Updating contact_campaign stage...')
+    const { error: ccUpdateError } = await supabase
       .from('contact_campaigns')
       .update({ stage: 'sent' })
       .eq('id', email.contact_campaign_id)
 
-    // Log engagement event
+    if (ccUpdateError) {
+      console.error('[SEND-EMAIL] Failed to update contact_campaign, attempting rollback:', ccUpdateError)
+      // Attempt to rollback email update
+      const { error: rollbackError } = await supabase
+        .from('emails')
+        .update({ sent_at: null, approved: false })
+        .eq('id', email_id)
+      
+      if (rollbackError) {
+        console.error('[SEND-EMAIL] CRITICAL: Rollback failed! Email marked as sent but campaign not updated:', rollbackError)
+        return NextResponse.json(
+          { success: false, error: 'Failed to update campaign status and rollback failed. Manual intervention required.', details: { ccError: ccUpdateError.message, rollbackError: rollbackError.message } },
+          { status: 500 }
+        )
+      }
+      
+      return NextResponse.json(
+        { success: false, error: 'Failed to update campaign status: ' + ccUpdateError.message },
+        { status: 500 }
+      )
+    }
+
+    // Step 3: Log engagement event (non-critical, don't fail the request)
     if (email.contact_campaign?.unified_thread_id) {
-      await supabase
+      const { error: eventError } = await supabase
         .from('engagement_events')
         .insert({
           unified_thread_id: email.contact_campaign.unified_thread_id,
@@ -166,6 +292,10 @@ export async function POST(request: NextRequest) {
           event_type: 'sent',
           metadata: { message_id: messageId, dry_run }
         })
+      
+      if (eventError) {
+        console.warn('[SEND-EMAIL] Failed to log engagement event (non-critical):', eventError)
+      }
     }
 
     return NextResponse.json({
@@ -186,36 +316,152 @@ export async function POST(request: NextRequest) {
   }
 }
 
-function buildHtmlEmail(body: any, contact: any): string {
+function buildHtmlEmail(body: any, contact: any, senderId: string, banner?: EmailBanner): string {
   const firstName = contact?.first_name || 'there'
+  const sender = getMemberById(senderId)
+  
+  // Get the HTML signature with the logo
+  const signatureHtml = getSignatureHtml(senderId, true) // true = use absolute URL
+  
+  // Get banner HTML if enabled
+  const bannerHtml = banner ? getBannerHtml(banner) : ''
+  
+  // Convert text to HTML paragraphs
+  // IMPORTANT: Preserve allowed formatting tags (<strong>, <em>, <a>) while escaping dangerous content
+  const formatParagraph = (text: string) => {
+    if (!text) return ''
+    
+    // Split by double newlines for paragraph breaks
+    const paragraphs = text.split(/\n\n+/).filter(p => p.trim())
+    
+    return paragraphs.map(p => {
+      // Preserve safe HTML formatting tags while escaping dangerous content
+      // Step 1: Temporarily replace allowed tags with placeholders
+      const allowedTags: Array<{ pattern: RegExp, replacement: string, placeholder: string }> = [
+        { pattern: /<strong>/gi, replacement: '<strong>', placeholder: '%%STRONG_OPEN%%' },
+        { pattern: /<\/strong>/gi, replacement: '</strong>', placeholder: '%%STRONG_CLOSE%%' },
+        { pattern: /<em>/gi, replacement: '<em>', placeholder: '%%EM_OPEN%%' },
+        { pattern: /<\/em>/gi, replacement: '</em>', placeholder: '%%EM_CLOSE%%' },
+        { pattern: /<b>/gi, replacement: '<strong>', placeholder: '%%B_OPEN%%' },
+        { pattern: /<\/b>/gi, replacement: '</strong>', placeholder: '%%B_CLOSE%%' },
+        { pattern: /<i>/gi, replacement: '<em>', placeholder: '%%I_OPEN%%' },
+        { pattern: /<\/i>/gi, replacement: '</em>', placeholder: '%%I_CLOSE%%' },
+        { pattern: /<u>/gi, replacement: '<u>', placeholder: '%%U_OPEN%%' },
+        { pattern: /<\/u>/gi, replacement: '</u>', placeholder: '%%U_CLOSE%%' },
+        // Preserve links - capture href attribute
+        { pattern: /<a\s+href="([^"]+)"[^>]*>/gi, replacement: '<a href="$1" style="color: #0066cc; text-decoration: underline;">', placeholder: '%%LINK_OPEN_$1%%' },
+        { pattern: /<\/a>/gi, replacement: '</a>', placeholder: '%%LINK_CLOSE%%' },
+      ]
+      
+      let processed = p
+      const linkHrefs: string[] = []
+      
+      // Extract and preserve links with their hrefs
+      processed = processed.replace(/<a\s+href="([^"]+)"[^>]*>/gi, (match, href) => {
+        linkHrefs.push(href)
+        return `%%LINK_OPEN_${linkHrefs.length - 1}%%`
+      })
+      
+      // Replace other allowed tags with placeholders
+      for (const tag of allowedTags.filter(t => !t.pattern.source.includes('<a'))) {
+        processed = processed.replace(tag.pattern, tag.placeholder)
+      }
+      
+      // Escape dangerous HTML
+      processed = escapeHtml(processed)
+      
+      // Restore allowed tags
+      processed = processed.replace(/%%STRONG_OPEN%%/g, '<strong>')
+      processed = processed.replace(/%%STRONG_CLOSE%%/g, '</strong>')
+      processed = processed.replace(/%%EM_OPEN%%/g, '<em>')
+      processed = processed.replace(/%%EM_CLOSE%%/g, '</em>')
+      processed = processed.replace(/%%B_OPEN%%/g, '<strong>')
+      processed = processed.replace(/%%B_CLOSE%%/g, '</strong>')
+      processed = processed.replace(/%%I_OPEN%%/g, '<em>')
+      processed = processed.replace(/%%I_CLOSE%%/g, '</em>')
+      processed = processed.replace(/%%U_OPEN%%/g, '<u>')
+      processed = processed.replace(/%%U_CLOSE%%/g, '</u>')
+      processed = processed.replace(/%%LINK_CLOSE%%/g, '</a>')
+      
+      // Restore links with their hrefs
+      linkHrefs.forEach((href, index) => {
+        processed = processed.replace(
+          `%%LINK_OPEN_${index}%%`,
+          `<a href="${href}" style="color: #0066cc; text-decoration: underline;">`
+        )
+      })
+      
+      // Convert newlines to <br>
+      const formatted = processed.replace(/\n/g, '<br>')
+      return `<p style="margin: 0 0 16px 0; line-height: 1.6; text-align: justify; text-justify: inter-word;">${formatted}</p>`
+    }).join('')
+  }
   
   return `
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; }
-    p { margin: 0 0 16px 0; }
-    .signature { margin-top: 24px; color: #666; font-size: 14px; }
-    a { color: #0066cc; }
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="format-detection" content="telephone=no, date=no, address=no, email=no">
+  <title>Message from ${sender?.name || 'Astant Global Management'}</title>
+  <!--[if mso]>
+  <style type="text/css">
+    table {border-collapse: collapse;}
+    td {padding: 0;}
+    p {text-align: justify !important;}
   </style>
+  <![endif]-->
 </head>
-<body>
-  <p>${body.greeting || `Hi ${firstName},`}</p>
-  <p>${body.context_p1 || ''}</p>
-  <p>${body.value_p2 || ''}</p>
-  <p>${body.cta || ''}</p>
-  <div class="signature">
-    ${(body.signature || '').replace(/\n/g, '<br>')}
-  </div>
+<body style="margin: 0; padding: 0; background-color: #ffffff; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; font-size: 15px; line-height: 1.6; color: #333333;">
+  ${bannerHtml}
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width: 600px; margin: 0 auto;">
+    <tr>
+      <td style="padding: 30px 20px; text-align: justify;">
+        <!-- Email Body -->
+        ${formatParagraph(body.greeting || `Good morning ${firstName},`)}
+        ${formatParagraph(body.context_p1 || '')}
+        ${formatParagraph(body.value_p2 || '')}
+        ${formatParagraph(body.cta || '')}
+        
+        <!-- Signature Section -->
+        <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #eeeeee;">
+          ${signatureHtml}
+        </div>
+      </td>
+    </tr>
+  </table>
+  
+  <!-- Anti-spam footer -->
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width: 600px; margin: 0 auto;">
+    <tr>
+      <td style="padding: 20px; text-align: center; font-size: 11px; color: #999999;">
+        <p style="margin: 0;">
+          ${COMPANY_INFO.name}<br>
+          ${COMPANY_INFO.address}, ${COMPANY_INFO.city}, ${COMPANY_INFO.country}
+        </p>
+      </td>
+    </tr>
+  </table>
 </body>
 </html>
   `.trim()
 }
 
-function buildTextEmail(body: any): string {
+function buildTextEmail(body: any, senderId: string): string {
+  const sender = getMemberById(senderId)
+  
+  const textSignature = sender ? `
+${sender.name}
+${sender.title}
+${COMPANY_INFO.name}
+${COMPANY_INFO.address}
+${COMPANY_INFO.city}, ${COMPANY_INFO.country}
+${sender.email}
+${COMPANY_INFO.website}
+` : body.signature || ''
+
   return [
     body.greeting,
     '',
@@ -225,6 +471,209 @@ function buildTextEmail(body: any): string {
     '',
     body.cta,
     '',
-    body.signature
+    '---',
+    textSignature.trim()
   ].filter(Boolean).join('\n')
+}
+
+// ============================================
+// BULK SEND HANDLER
+// For sending 100s or 1000s of emails
+// ============================================
+
+async function handleBulkSend(request: BulkSendRequest) {
+  const { campaign_id, email_ids, filter = 'approved', sender_id, dry_run = false } = request
+
+  const supabase = createClient()
+
+  // Build query for emails in this campaign
+  let query = supabase
+    .from('emails')
+    .select(`
+      *,
+      contact_campaign:contact_campaigns!inner(
+        *,
+        campaign_id,
+        contact:contacts(*)
+      )
+    `)
+    .eq('contact_campaigns.campaign_id', campaign_id)
+    .is('sent_at', null) // Not already sent
+
+  // Filter by specific IDs if provided
+  if (email_ids && email_ids.length > 0) {
+    query = query.in('id', email_ids)
+  }
+
+  // Filter by approval status
+  if (filter === 'approved') {
+    query = query.eq('approved', true)
+  }
+
+  const { data: emails, error: emailsError } = await query
+
+  if (emailsError) {
+    return NextResponse.json({ success: false, error: emailsError.message }, { status: 500 })
+  }
+
+  if (!emails || emails.length === 0) {
+    return NextResponse.json({
+      success: false,
+      error: 'No emails found to send',
+      filter_used: filter
+    }, { status: 404 })
+  }
+
+  // Dry run - return what would be sent
+  if (dry_run) {
+    return NextResponse.json({
+      success: true,
+      dry_run: true,
+      would_send: emails.length,
+      emails: emails.map(e => ({
+        id: e.id,
+        to: e.contact_campaign?.contact?.email,
+        subject: e.subject,
+        contact_name: `${e.contact_campaign?.contact?.first_name} ${e.contact_campaign?.contact?.last_name}`
+      })),
+      estimated_time: `${Math.ceil(emails.length / BATCH_SIZE) * (BATCH_DELAY_MS / 1000)}s`
+    })
+  }
+
+  // Track results
+  const results = {
+    total: emails.length,
+    sent: 0,
+    failed: 0,
+    skipped: 0,
+    errors: [] as Array<{ email_id: string; error: string }>,
+    message_ids: [] as string[]
+  }
+
+  // Get sender info - use sender_id from request, or fallback to campaign's sender
+  const campaign = emails[0]?.contact_campaign?.campaign
+  const effectiveSenderId = sender_id || campaign?.sender_id || 'jean-francois'
+  const senderInfo = getSenderFromId(effectiveSenderId)
+
+  // Process in batches with rate limiting
+  for (let i = 0; i < emails.length; i += BATCH_SIZE) {
+    const batch = emails.slice(i, i + BATCH_SIZE)
+
+    const batchPromises = batch.map(async (email) => {
+      const contact = email.contact_campaign?.contact
+      const toEmail = contact?.email
+
+      if (!toEmail) {
+        results.skipped++
+        results.errors.push({ email_id: email.id, error: 'No recipient email' })
+        return
+      }
+
+      const emailBody = email.current_body || email.original_body
+      const textBody = buildTextEmail(emailBody, effectiveSenderId)
+      
+      // Create banner config from email body settings  
+      const emailBanner: EmailBanner | undefined = emailBody?.bannerEnabled 
+        ? { ...DEFAULT_BANNER, enabled: true }
+        : undefined
+      
+      const htmlBody = buildHtmlEmail(emailBody, contact, effectiveSenderId, emailBanner)
+
+      // Fetch attachments if any (same as single send)
+      const { data: attachments } = await supabase
+        .from('email_attachments')
+        .select('*')
+        .eq('email_id', email.id)
+
+      try {
+        let messageId: string
+
+        if (resend) {
+          // Build send payload
+          const resendPayload: any = {
+            from: `${senderInfo.name} <${senderInfo.email}>`,
+            to: [toEmail],
+            subject: email.subject,
+            text: textBody,
+            html: htmlBody,
+            replyTo: senderInfo.email,
+            tags: [
+              { name: 'campaign', value: campaign_id },
+              { name: 'contact', value: contact.id }
+            ]
+          }
+
+          // Add attachments if present
+          if (attachments && attachments.length > 0) {
+            resendPayload.attachments = await Promise.all(
+              attachments.map(async (att) => {
+                const { data: fileData } = await supabase.storage
+                  .from('email-attachments')
+                  .download(att.storage_path)
+                
+                if (fileData) {
+                  const buffer = await fileData.arrayBuffer()
+                  return {
+                    filename: att.file_name,
+                    content: Buffer.from(buffer).toString('base64'),
+                  }
+                }
+                return null
+              })
+            ).then(atts => atts.filter(Boolean))
+          }
+
+          // Send via Resend SDK
+          const { data: sendResult, error: sendError } = await resend.emails.send(resendPayload)
+
+          if (sendError) {
+            throw new Error(sendError.message)
+          }
+
+          messageId = sendResult?.id || `resend-${Date.now()}`
+        } else {
+          // Simulated send (no API key)
+          console.log(`[SIMULATED] Sending to ${toEmail}: ${email.subject}`)
+          messageId = `simulated-${Date.now()}-${Math.random().toString(36).slice(2)}`
+        }
+
+        // Update database
+        const sentAt = new Date().toISOString()
+
+        await supabase
+          .from('emails')
+          .update({ sent_at: sentAt, approved: true })
+          .eq('id', email.id)
+
+        await supabase
+          .from('contact_campaigns')
+          .update({ stage: 'sent' })
+          .eq('id', email.contact_campaign.id)
+
+        results.sent++
+        results.message_ids.push(messageId)
+
+      } catch (err: any) {
+        results.failed++
+        results.errors.push({ email_id: email.id, error: err.message })
+      }
+    })
+
+    await Promise.all(batchPromises)
+
+    // Rate limiting delay between batches
+    if (i + BATCH_SIZE < emails.length) {
+      await new Promise(resolve => setTimeout(resolve, BATCH_DELAY_MS))
+    }
+  }
+
+  return NextResponse.json({
+    success: true,
+    stats: results,
+    resend_configured: !!resend,
+    rate_limit: {
+      batch_size: BATCH_SIZE,
+      delay_ms: BATCH_DELAY_MS
+    }
+  })
 }

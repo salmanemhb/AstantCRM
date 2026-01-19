@@ -109,6 +109,7 @@ CREATE TABLE campaigns (
   status TEXT DEFAULT 'draft', -- draft, ready, active
   contacts_count INTEGER DEFAULT 0,
   fallback_strategy TEXT,
+  sender_id TEXT, -- Team member ID for campaign-level sender assignment
   created_by UUID,
   created_at TIMESTAMPTZ DEFAULT now()
 );
@@ -134,6 +135,7 @@ CREATE TABLE contact_campaigns (
   stage contact_stage_enum NOT NULL DEFAULT 'drafted',
   confidence_score confidence_score_enum NOT NULL,
   last_email_id UUID,
+  sender_id TEXT, -- Team member ID for per-contact sender override
   updated_at TIMESTAMPTZ DEFAULT now(),
 
   CONSTRAINT no_red_auto_advance CHECK (
@@ -154,6 +156,7 @@ CREATE TABLE emails (
 
   confidence_score confidence_score_enum NOT NULL,
   approved BOOLEAN NOT NULL DEFAULT false,
+  approved_at TIMESTAMPTZ, -- Timestamp when email was approved
 
   last_rebuttal_enum rebuttal_enum,
   mutated_at TIMESTAMPTZ,

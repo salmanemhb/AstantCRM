@@ -58,6 +58,8 @@ export interface Campaign {
   contacts_count?: number
   fallback_strategy?: string | null
   created_by?: string | null
+  sender_id?: string | null
+  template_id?: string | null
   created_at: string
 }
 
@@ -78,6 +80,7 @@ export interface ContactCampaign {
   stage: ContactStage
   confidence_score: ConfidenceScore
   last_email_id: string | null
+  sender_id?: string | null
   updated_at: string
   // Joined relations
   contact?: Contact
@@ -92,6 +95,7 @@ export interface EmailJsonBody {
   cta: string
   signature: string
   signatureMemberId?: string  // Team member ID for signature (jean-francois, fahd, marcos)
+  bannerEnabled?: boolean     // Whether to show the email banner at top
 }
 
 export interface Email {

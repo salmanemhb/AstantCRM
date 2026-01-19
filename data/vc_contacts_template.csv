@@ -1,0 +1,21 @@
+first_name,last_name,email,firm,title,category,industry_focus,stage_focus,check_size,location,linkedin_url,notes
+John,Smith,john.smith@sequoia.com,Sequoia Capital,Partner,Tier 1 VC,Fintech|AI|Enterprise SaaS,Series A|Series B,$5M-$50M,San Francisco,https://linkedin.com/in/johnsmith,Focused on B2B fintech and AI infrastructure
+Sarah,Chen,sarah.chen@a16z.com,Andreessen Horowitz,General Partner,Tier 1 VC,Consumer Tech|Crypto|Web3,Seed|Series A,$1M-$25M,Menlo Park,https://linkedin.com/in/sarahchen,Strong interest in consumer apps and crypto
+Michael,Johnson,michael.j@accel.com,Accel Partners,Principal,Tier 1 VC,Enterprise Software|Cybersecurity,Series A|Series B,$10M-$100M,Palo Alto,https://linkedin.com/in/michaeljohnson,Previously at Google Ventures
+Emma,Williams,emma@index.vc,Index Ventures,Partner,Tier 1 VC,Fintech|Marketplaces|SaaS,Series A|Series B|Growth,€10M-€50M,London,https://linkedin.com/in/emmawilliams,European fintech specialist
+Carlos,Garcia,carlos@atomico.com,Atomico,Principal,Tier 1 VC,Climate Tech|Deep Tech|SaaS,Series A|Series B,€5M-€30M,London,https://linkedin.com/in/carlosgarcia,Focus on European founders
+David,Lee,david.lee@greylock.com,Greylock Partners,Partner,Tier 1 VC,AI|Enterprise|Developer Tools,Series A|Series B,$5M-$50M,San Francisco,https://linkedin.com/in/davidlee,Led investments in AI/ML companies
+Maria,Rodriguez,maria@insight.com,Insight Partners,Managing Director,Growth Equity,Software|Data Analytics,Series B|Series C|Growth,$25M-$200M,New York,https://linkedin.com/in/mariarodriguez,Growth stage software specialist
+James,Brown,james@balderton.com,Balderton Capital,Partner,Tier 1 VC,Fintech|Healthtech|Marketplaces,Series A|Series B,€5M-€25M,London,https://linkedin.com/in/jamesbrown,Former fintech founder
+Anna,Mueller,anna.m@earlybird.vc,Earlybird VC,Principal,European VC,B2B SaaS|Fintech|Healthtech,Seed|Series A,€1M-€15M,Berlin,https://linkedin.com/in/annamueller,Focus on DACH region founders
+Pierre,Dubois,pierre@partech.vc,Partech Partners,Partner,European VC,Consumer|Fintech|Enterprise,Seed|Series A|Series B,€2M-€20M,Paris,https://linkedin.com/in/pierredubois,Pan-European investment focus
+Lisa,Wang,lisa.wang@gv.com,Google Ventures,Partner,Corporate VC,AI|Enterprise|Healthcare,Series A|Series B,$5M-$25M,Mountain View,https://linkedin.com/in/lisawang,Strong technical background in ML
+Robert,Taylor,robert@generalcatalyst.com,General Catalyst,Managing Director,Tier 1 VC,Fintech|Enterprise|Consumer,Series A|Growth,$10M-$100M,Boston,https://linkedin.com/in/roberttaylor,Focus on transformational companies
+Sophie,Martin,sophie@lakestar.vc,Lakestar,Partner,European VC,Consumer Tech|Fintech|Marketplaces,Series A|Series B,€5M-€40M,Zurich,https://linkedin.com/in/sophiemartin,Early investor in Spotify
+Marco,Rossi,marco@p101.it,P101 Ventures,Partner,European VC,Digital|Fintech|Foodtech,Seed|Series A,€1M-€10M,Milan,https://linkedin.com/in/marcorossi,Italian tech ecosystem expert
+Henrik,Andersson,henrik@northzone.com,Northzone,Partner,European VC,Fintech|Consumer|Marketplaces,Seed|Series A|Series B,€2M-€25M,Stockholm,https://linkedin.com/in/henrikanders,Focus on Nordic and European startups
+Amanda,Foster,amanda@bessemer.com,Bessemer Venture Partners,Partner,Tier 1 VC,Cloud|SaaS|Vertical Software,Series A|Series B|Growth,$5M-$100M,San Francisco,https://linkedin.com/in/amandafoster,Cloud and vertical SaaS expert
+Kevin,Park,kevin@svb.com,SVB Capital,Managing Partner,Corporate VC,Fintech|Enterprise|Healthtech,Series A|Series B,$3M-$25M,San Francisco,https://linkedin.com/in/kevinpark,Strong bank ecosystem connections
+Julia,Schmidt,julia@hv.capital,HV Capital,Partner,European VC,B2B SaaS|Fintech|Mobility,Seed|Series A,€1M-€15M,Munich,https://linkedin.com/in/juliaschmidt,DACH fintech specialist
+Thomas,Nielsen,thomas@creandum.com,Creandum,Partner,European VC,SaaS|Fintech|Gaming,Seed|Series A,€1M-€20M,Stockholm,https://linkedin.com/in/thomasnielsen,Early Spotify investor
+Rachel,Kim,rachel.kim@lightspeed.com,Lightspeed Venture Partners,Partner,Tier 1 VC,Enterprise|Consumer|Fintech,Series A|Series B|Growth,$10M-$100M,Menlo Park,https://linkedin.com/in/rachelkim,Focus on enterprise SaaS

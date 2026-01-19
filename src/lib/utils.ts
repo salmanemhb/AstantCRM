@@ -36,6 +36,20 @@ export function getConfidenceColor(score: 'green' | 'yellow' | 'red'): string {
   }
 }
 
+/**
+ * Convert a numeric confidence value to the database enum value.
+ * Accepts either percentage (0-100) or decimal (0-1) values.
+ * @param confidence - Numeric confidence value (0-100 or 0-1)
+ * @returns 'green' | 'yellow' | 'red'
+ */
+export function confidenceToEnum(confidence: number): 'green' | 'yellow' | 'red' {
+  // Normalize to percentage if given as decimal
+  const pct = confidence <= 1 ? confidence * 100 : confidence
+  if (pct >= 80) return 'green'
+  if (pct >= 50) return 'yellow'
+  return 'red'
+}
+
 export function getConfidenceBadgeColor(score: 'green' | 'yellow' | 'red'): string {
   switch (score) {
     case 'green':
