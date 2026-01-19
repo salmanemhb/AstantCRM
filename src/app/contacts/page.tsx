@@ -2,8 +2,8 @@
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { 
-  ArrowLeft, 
+import {
+  ArrowLeft,
   Plus,
   Users,
   Search,
@@ -19,6 +19,7 @@ import type { Contact, ContactList } from '@/lib/types'
 import { formatDate } from '@/lib/utils'
 import { formatCellValue } from '@/lib/spreadsheet-parser'
 import ImportContactsModal from '@/components/import-contacts-modal'
+import ContactFilters, { applyFilters, type ActiveFilter } from '@/components/contact-filters'
 
 // Demo data - only shown in development when no real data exists
 const DEMO_LISTS: (ContactList & { contacts: Contact[] })[] = process.env.NODE_ENV === 'development' ? [
@@ -99,6 +100,10 @@ export default function ContactsPage() {
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [expandedLists, setExpandedLists] = useState<Set<string>>(new Set(['demo-list-1']))
 
+  // Filter state
+  const [selectedListIds, setSelectedListIds] = useState<string[]>([])
+  const [activeFilters, setActiveFilters] = useState<ActiveFilter[]>([])
+
   const supabase = createClient()
 
   // Get list of deleted demo list IDs from localStorage
@@ -178,7 +183,7 @@ export default function ContactsPage() {
 
   const deleteList = async (listId: string) => {
     if (!confirm('Delete this list and all its contacts? This cannot be undone.')) return
-    
+
     // Check if this is a demo list
     const isDemoList = listId.startsWith('demo-')
 
@@ -224,6 +229,30 @@ export default function ContactsPage() {
 
   // Count total contacts
   const totalContacts = lists.reduce((sum, l) => sum + (l.contacts?.length || 0), 0) + manualContacts.length
+
+  // Get all contacts (for filtering)
+  const allContacts = lists.flatMap(l => l.contacts || []).concat(manualContacts)
+
+  // Apply filters to all contacts
+  const filteredContacts = applyFilters(
+    allContacts,
+    activeFilters,
+    selectedListIds,
+    (c) => c.contact_list_id || null
+  )
+
+  // Group filtered contacts by list for display
+  const filteredContactsByList = new Map<string, Contact[]>()
+  for (const contact of filteredContacts) {
+    const listId = contact.contact_list_id || 'manual'
+    if (!filteredContactsByList.has(listId)) {
+      filteredContactsByList.set(listId, [])
+    }
+    filteredContactsByList.get(listId)!.push(contact)
+  }
+
+  // Check if any filters are active
+  const hasActiveFilters = activeFilters.length > 0 || selectedListIds.length > 0
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -278,6 +307,27 @@ export default function ContactsPage() {
         </div>
       </div>
 
+      {/* Filter Bar */}
+      {lists.length > 0 && (
+        <div className="bg-gray-50 border-b border-gray-200">
+          <div className="max-w-5xl mx-auto px-4 py-3">
+            <ContactFilters
+              contactLists={lists.map(l => ({
+                id: l.id,
+                name: l.name,
+                filter_columns: l.filter_columns as Record<string, string[]> | undefined,
+              }))}
+              selectedListIds={selectedListIds}
+              onListSelectionChange={setSelectedListIds}
+              activeFilters={activeFilters}
+              onFiltersChange={setActiveFilters}
+              totalCount={totalContacts}
+              filteredCount={hasActiveFilters ? filteredContacts.length : undefined}
+            />
+          </div>
+        </div>
+      )}
+
       {/* Main Content */}
       <main className="max-w-5xl mx-auto px-4 py-8">
         {isLoading ? (
@@ -288,27 +338,45 @@ export default function ContactsPage() {
           <EmptyState onImport={() => setShowImportModal(true)} onCreate={() => setShowCreateModal(true)} />
         ) : (
           <div className="space-y-4">
-            {/* Contact Lists */}
-            {lists.map((list) => (
-              <ContactListCard
-                key={list.id}
-                list={list}
-                isExpanded={expandedLists.has(list.id)}
-                onToggle={() => toggleList(list.id)}
-                onDelete={() => deleteList(list.id)}
-                searchQuery={searchQuery}
-                filterContacts={filterContacts}
-              />
-            ))}
+            {/* Contact Lists - Only show lists that have filtered contacts or no filters active */}
+            {lists.map((list) => {
+              const listFilteredContacts = hasActiveFilters
+                ? filteredContactsByList.get(list.id) || []
+                : filterContacts(list.contacts || [])
+
+              // Hide list if filters are active and no contacts match
+              if (hasActiveFilters && listFilteredContacts.length === 0) return null
+
+              return (
+                <ContactListCard
+                  key={list.id}
+                  list={{ ...list, contacts: listFilteredContacts }}
+                  isExpanded={expandedLists.has(list.id)}
+                  onToggle={() => toggleList(list.id)}
+                  onDelete={() => deleteList(list.id)}
+                  searchQuery={searchQuery}
+                  filterContacts={(contacts) => contacts} // Already filtered
+                  totalInList={list.contacts?.length || 0}
+                />
+              )
+            })}
 
             {/* Manual Contacts */}
-            {manualContacts.length > 0 && (
-              <ManualContactsCard
-                contacts={filterContacts(manualContacts)}
-                isExpanded={expandedLists.has('manual')}
-                onToggle={() => toggleList('manual')}
-              />
-            )}
+            {(() => {
+              const manualFiltered = hasActiveFilters
+                ? filteredContactsByList.get('manual') || []
+                : filterContacts(manualContacts)
+
+              if (manualFiltered.length === 0) return null
+
+              return (
+                <ManualContactsCard
+                  contacts={manualFiltered}
+                  isExpanded={expandedLists.has('manual')}
+                  onToggle={() => toggleList('manual')}
+                />
+              )
+            })()}
           </div>
         )}
       </main>
@@ -368,6 +436,7 @@ function ContactListCard({
   onDelete,
   searchQuery,
   filterContacts,
+  totalInList,
 }: {
   list: ContactList & { contacts: Contact[] }
   isExpanded: boolean
@@ -375,9 +444,11 @@ function ContactListCard({
   onDelete: () => void
   searchQuery: string
   filterContacts: (contacts: Contact[]) => Contact[]
+  totalInList?: number // Original count before filtering
 }) {
   const filteredContacts = filterContacts(list.contacts || [])
-  const showingFiltered = searchQuery && filteredContacts.length !== (list.contacts?.length || 0)
+  const originalCount = totalInList ?? list.row_count
+  const showingFiltered = (searchQuery || totalInList !== undefined) && filteredContacts.length !== originalCount
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
@@ -404,9 +475,9 @@ function ContactListCard({
               <span>•</span>
               <span>
                 {showingFiltered ? (
-                  <>{filteredContacts.length} of {list.row_count} shown</>
+                  <>{filteredContacts.length} of {originalCount} shown</>
                 ) : (
-                  <>{list.row_count} contacts</>
+                  <>{originalCount} contacts</>
                 )}
               </span>
               <span>•</span>
@@ -549,12 +620,12 @@ function ManualContactsCard({
   )
 }
 
-function CreateContactModal({ 
-  onClose, 
-  onCreated 
-}: { 
+function CreateContactModal({
+  onClose,
+  onCreated
+}: {
   onClose: () => void
-  onCreated: () => void 
+  onCreated: () => void
 }) {
   const [formData, setFormData] = useState({
     first_name: '',

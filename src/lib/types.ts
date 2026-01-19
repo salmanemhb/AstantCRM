@@ -23,6 +23,7 @@ export interface ContactList {
   column_mapping: Record<string, string> // Maps original columns to our fields
   original_headers: string[] // Original column headers from file
   row_count: number
+  filter_columns?: Record<string, string[]> // Auto-detected filterable columns with unique values
   created_at: string
   // Joined
   contacts?: Contact[]

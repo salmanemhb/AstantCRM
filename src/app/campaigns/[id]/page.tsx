@@ -3,8 +3,8 @@
 import { useState, useEffect } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { 
-  ArrowLeft, 
+import {
+  ArrowLeft,
   Target,
   Users,
   Mail,
@@ -21,9 +21,10 @@ import {
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { generateDraft } from '@/lib/api'
-import type { Contact, ContactCampaign, Email, EmailJsonBody } from '@/lib/types'
+import type { Contact, ContactCampaign, Email, EmailJsonBody, ContactList } from '@/lib/types'
 import { formatDate, getToneLabel } from '@/lib/utils'
 import GmailEmailComposer from '@/components/gmail-email-composer'
+import ContactFilters, { applyFilters, type ActiveFilter } from '@/components/contact-filters'
 import BulkOperationsPanel, { BatchGenerationModal } from '@/components/bulk-operations-panel'
 import { getSignatureText, getMemberById } from '@/lib/signatures'
 // Note: template-utils is used by gmail-email-composer for updateSenderInBody
@@ -80,7 +81,12 @@ export default function CampaignDetailPage() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const [showBatchGeneration, setShowBatchGeneration] = useState(false)
   const [bulkStats, setBulkStats] = useState<any>(null)
-  
+
+  // Filter state for Add VCs modal
+  const [modalSelectedListIds, setModalSelectedListIds] = useState<string[]>([])
+  const [modalActiveFilters, setModalActiveFilters] = useState<ActiveFilter[]>([])
+  const [contactLists, setContactLists] = useState<{ id: string; name: string; filter_columns?: Record<string, string[]> }[]>([])
+
   // Saved format state - stores the FORMAT/STRUCTURE to apply to other emails
   const [savedFormat, setSavedFormat] = useState<SavedFormat | null>(() => {
     // Load from localStorage on mount (client-side only)
@@ -98,7 +104,7 @@ export default function CampaignDetailPage() {
     return null
   })
   const [isApplyingFormat, setIsApplyingFormat] = useState(false)
-  
+
   // Persist savedFormat to localStorage whenever it changes
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -136,19 +142,26 @@ export default function CampaignDetailPage() {
           .order('last_name', { ascending: true })
         setContacts(contactsData || [])
 
+        // Fetch contact lists with filter columns for Add VCs filtering
+        const { data: listsData } = await supabase
+          .from('contact_lists')
+          .select('id, name, filter_columns')
+          .order('created_at', { ascending: false })
+        setContactLists(listsData || [])
+
         const { data: ccData, error: ccError } = await supabase
           .from('contact_campaigns')
           .select(`*, contact:contacts (*), emails:emails (*)`)
           .eq('campaign_id', campaignId)
           .order('updated_at', { ascending: true })
-        
+
         // Handle query error by showing empty state rather than crashing
         if (ccError) {
           console.error('[CAMPAIGN-PAGE] Failed to fetch contact_campaigns:', ccError)
         }
-        
+
         setContactCampaigns(ccData || [])
-        
+
         // Fetch bulk stats
         if (ccData && ccData.length > 0) {
           try {
@@ -173,10 +186,10 @@ export default function CampaignDetailPage() {
   const handleDeleteCampaign = async () => {
     if (!confirm('Delete this campaign and all drafts?')) return
     setIsDeleting(true)
-    
+
     // Check if this is a demo campaign
     const isDemoCampaign = campaignId.startsWith('demo-')
-    
+
     try {
       if (!isDemoCampaign) {
         // First delete all emails associated with this campaign's contact_campaigns
@@ -184,30 +197,30 @@ export default function CampaignDetailPage() {
         if (ccIds.length > 0) {
           // Get all email IDs for these contact_campaigns
           const { data: emails } = await supabase.from('emails').select('id').in('contact_campaign_id', ccIds)
-          
+
           if (emails && emails.length > 0) {
             const emailIds = emails.map(e => e.id)
             // Delete engagement_events first (foreign key constraint)
             await supabase.from('engagement_events').delete().in('email_id', emailIds)
           }
-          
+
           // Get unified_thread_ids to clean up orphaned threads
           const threadIds = contactCampaigns.map(cc => cc.unified_thread_id).filter(Boolean)
-          
+
           // Now delete emails and contact_campaigns
           await supabase.from('emails').delete().in('contact_campaign_id', ccIds)
           await supabase.from('contact_campaigns').delete().eq('campaign_id', campaignId)
-          
+
           // Delete orphaned unified_threads
           if (threadIds.length > 0) {
             await supabase.from('unified_threads').delete().in('id', threadIds)
           }
         }
-        
+
         // Now delete the campaign from database
         await supabase.from('campaigns').delete().eq('id', campaignId)
       }
-      
+
       // Always clean up localStorage (including saved format)
       const stored = JSON.parse(localStorage.getItem('local_campaigns') || '[]')
       localStorage.setItem('local_campaigns', JSON.stringify(stored.filter((c: any) => c.id !== campaignId)))
@@ -223,7 +236,7 @@ export default function CampaignDetailPage() {
   const handleDeleteContact = async (contactCampaignId: string, contactName: string) => {
     // Check if this is a demo contact campaign
     const isDemoContact = contactCampaignId.startsWith('demo-')
-    
+
     try {
       if (!isDemoContact) {
         // Get the contact_campaign to find its unified_thread_id
@@ -232,25 +245,25 @@ export default function CampaignDetailPage() {
           .select('unified_thread_id')
           .eq('id', contactCampaignId)
           .single()
-        
+
         if (ccError) throw new Error(`Failed to fetch contact_campaign: ${ccError.message}`)
-        
+
         // Get email IDs first to delete engagement_events
         const { data: emails, error: emailsError } = await supabase.from('emails').select('id').eq('contact_campaign_id', contactCampaignId)
         if (emailsError) throw new Error(`Failed to fetch emails: ${emailsError.message}`)
-        
+
         if (emails && emails.length > 0) {
           const emailIds = emails.map(e => e.id)
           const { error: eventsError } = await supabase.from('engagement_events').delete().in('email_id', emailIds)
           if (eventsError) console.warn('Failed to delete engagement_events:', eventsError)
         }
-        
+
         const { error: deleteEmailsError } = await supabase.from('emails').delete().eq('contact_campaign_id', contactCampaignId)
         if (deleteEmailsError) throw new Error(`Failed to delete emails: ${deleteEmailsError.message}`)
-        
+
         const { error: deleteCcError } = await supabase.from('contact_campaigns').delete().eq('id', contactCampaignId)
         if (deleteCcError) throw new Error(`Failed to delete contact_campaign: ${deleteCcError.message}`)
-        
+
         // Delete orphaned unified_thread
         if (cc?.unified_thread_id) {
           const { error: threadError } = await supabase.from('unified_threads').delete().eq('id', cc.unified_thread_id)
@@ -283,16 +296,16 @@ export default function CampaignDetailPage() {
         .from('contact_campaigns')
         .select('contact_id')
         .eq('campaign_id', campaignId)
-      
+
       if (fetchError) {
         console.error('[handleAddContacts] Error fetching existing CCs:', fetchError)
       }
       console.log('[handleAddContacts] Existing CCs:', existingCCs)
-      
+
       const existingContactIds = existingCCs?.map(cc => cc.contact_id) || []
       const newContacts = selectedContacts.filter(id => !existingContactIds.includes(id))
       console.log('[handleAddContacts] New contacts to add:', newContacts)
-      
+
       if (newContacts.length === 0) {
         console.log('[handleAddContacts] All selected contacts already in campaign')
         setSuccessMessage('All selected contacts are already in this campaign')
@@ -331,7 +344,7 @@ export default function CampaignDetailPage() {
           })
           .select()
           .single()
-        
+
         if (ccError) {
           console.error('[handleAddContacts] CC creation error:', ccError)
           throw ccError
@@ -360,7 +373,7 @@ export default function CampaignDetailPage() {
       setContactCampaigns(updatedCc || [])
       setShowAddContacts(false)
       setSelectedContacts([])
-      
+
       setSuccessMessage(`Generated ${newContacts.length} draft${newContacts.length > 1 ? 's' : ''}!`)
       setTimeout(() => setSuccessMessage(null), 3000)
     } catch (err: any) {
@@ -382,7 +395,7 @@ export default function CampaignDetailPage() {
         throw emailError
       }
       console.log('[handleApproveEmail] Email updated:', emailData)
-      
+
       console.log('[handleApproveEmail] Updating contact_campaign stage to approved')
       const { error: ccError, data: ccData } = await supabase.from('contact_campaigns').update({ stage: 'approved' }).eq('id', email.contact_campaign_id).select()
       if (ccError) {
@@ -390,9 +403,9 @@ export default function CampaignDetailPage() {
         throw ccError
       }
       console.log('[handleApproveEmail] CC updated:', ccData)
-      
-      setContactCampaigns(prev => prev.map(cc => cc.id === email.contact_campaign_id 
-        ? { ...cc, stage: 'approved', emails: cc.emails?.map(e => e.id === email.id ? { ...e, approved: true } : e) } 
+
+      setContactCampaigns(prev => prev.map(cc => cc.id === email.contact_campaign_id
+        ? { ...cc, stage: 'approved', emails: cc.emails?.map(e => e.id === email.id ? { ...e, approved: true } : e) }
         : cc))
       setSuccessMessage('Email approved!')
       setTimeout(() => setSuccessMessage(null), 2000)
@@ -411,16 +424,16 @@ export default function CampaignDetailPage() {
         console.error('[handleUnapproveEmail] Email update error:', emailError)
         throw emailError
       }
-      
+
       console.log('[handleUnapproveEmail] Updating contact_campaign stage to drafted')
       const { error: ccError } = await supabase.from('contact_campaigns').update({ stage: 'drafted' }).eq('id', email.contact_campaign_id)
       if (ccError) {
         console.error('[handleUnapproveEmail] CC update error:', ccError)
         throw ccError
       }
-      
-      setContactCampaigns(prev => prev.map(cc => cc.id === email.contact_campaign_id 
-        ? { ...cc, stage: 'drafted', emails: cc.emails?.map(e => e.id === email.id ? { ...e, approved: false } : e) } 
+
+      setContactCampaigns(prev => prev.map(cc => cc.id === email.contact_campaign_id
+        ? { ...cc, stage: 'drafted', emails: cc.emails?.map(e => e.id === email.id ? { ...e, approved: false } : e) }
         : cc))
       setSuccessMessage('Email unlocked for editing')
       setTimeout(() => setSuccessMessage(null), 2000)
@@ -434,7 +447,7 @@ export default function CampaignDetailPage() {
     try {
       const { error: saveError } = await supabase.from('emails').update(updates).eq('id', emailId)
       if (saveError) throw saveError
-      
+
       // If the sender was changed (signatureMemberId in current_body), also update contact_campaign.sender_id
       // This ensures the email is sent FROM the correct person
       if (updates.current_body?.signatureMemberId) {
@@ -452,12 +465,12 @@ export default function CampaignDetailPage() {
           }
         }
       }
-      
+
       setContactCampaigns(prev => prev.map(cc => ({
         ...cc,
         // Also update sender_id in local state if changed
-        sender_id: updates.current_body?.signatureMemberId && cc.emails?.some(e => e.id === emailId) 
-          ? updates.current_body.signatureMemberId 
+        sender_id: updates.current_body?.signatureMemberId && cc.emails?.some(e => e.id === emailId)
+          ? updates.current_body.signatureMemberId
           : cc.sender_id,
         emails: cc.emails?.map(e => e.id === emailId ? { ...e, ...updates } : e)
       })))
@@ -479,19 +492,19 @@ export default function CampaignDetailPage() {
         body: JSON.stringify({ email_id: email.id }),
       })
       console.log('[handleSendEmail] Response status:', response.status)
-      
+
       const result = await response.json()
       console.log('[handleSendEmail] Result:', result)
-      
+
       if (!result.success) {
         console.error('[handleSendEmail] API returned failure:', result.error)
         throw new Error(result.error || 'Failed to send email')
       }
-      
+
       console.log('[handleSendEmail] Email sent successfully, updating local state')
       // Update local state
-      setContactCampaigns(prev => prev.map(item => item.id === email.contact_campaign_id 
-        ? { ...item, stage: 'sent', emails: item.emails?.map(e => e.id === email.id ? { ...e, approved: true, sent_at: result.sent_at } : e) } 
+      setContactCampaigns(prev => prev.map(item => item.id === email.contact_campaign_id
+        ? { ...item, stage: 'sent', emails: item.emails?.map(e => e.id === email.id ? { ...e, approved: true, sent_at: result.sent_at } : e) }
         : item))
       setSuccessMessage(`Email sent to ${cc.contact?.first_name}!`)
       setTimeout(() => setSuccessMessage(null), 3000)
@@ -515,11 +528,11 @@ export default function CampaignDetailPage() {
           if (error) console.error('[handleRegenerateDraft] Error deleting email:', email.id, error)
         }
       }
-      
+
       console.log('[handleRegenerateDraft] Calling generateDraft...')
-      await generateDraft({ 
-        contact_id: contactId, 
-        campaign_id: campaignId, 
+      await generateDraft({
+        contact_id: contactId,
+        campaign_id: campaignId,
         signature: 'Best regards,\nAstant Global Management',
         config: senderId ? { sender_id: senderId } : undefined
       })
@@ -537,9 +550,17 @@ export default function CampaignDetailPage() {
   }
 
   const toggleContact = (contactId: string) => setSelectedContacts(prev => prev.includes(contactId) ? prev.filter(id => id !== contactId) : [...prev, contactId])
-  const selectAllContacts = () => setSelectedContacts(availableContacts.map(c => c.id))
+  const selectAllContacts = () => setSelectedContacts(filteredAvailableContacts.map(c => c.id))
   const unselectAllContacts = () => setSelectedContacts([])
   const availableContacts = contacts.filter(c => !contactCampaigns.some(cc => cc.contact_id === c.id))
+
+  // Apply modal filters to available contacts
+  const filteredAvailableContacts = applyFilters(
+    availableContacts,
+    modalActiveFilters,
+    modalSelectedListIds,
+    (c) => c.contact_list_id || null
+  )
 
   // Refresh bulk stats
   const refreshBulkStats = async () => {
@@ -586,8 +607,8 @@ export default function CampaignDetailPage() {
             </div>
             <div className="flex items-center space-x-3">
               {availableContacts.length > 0 && (
-                <button 
-                  onClick={() => setShowBatchGeneration(true)} 
+                <button
+                  onClick={() => setShowBatchGeneration(true)}
                   className="flex items-center space-x-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
                 >
                   <Sparkles className="h-4 w-4" />
@@ -626,7 +647,7 @@ export default function CampaignDetailPage() {
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
           <div className="px-6 py-4 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
             <h2 className="text-sm font-semibold text-gray-900 uppercase tracking-wider">Email Drafts</h2>
-            
+
             {/* Format Sync Controls */}
             {contactCampaigns.length >= 1 && (
               <div className="flex items-center space-x-3">
@@ -635,7 +656,7 @@ export default function CampaignDetailPage() {
                     onClick={async () => {
                       setIsApplyingFormat(true)
                       console.log('[ApplyFormat] Syncing format to all emails...')
-                      
+
                       try {
                         // Use the sync-format API to apply structural changes
                         const response = await fetch('/api/sync-format', {
@@ -647,12 +668,12 @@ export default function CampaignDetailPage() {
                             sourceBody: savedFormat.templateBody,
                           })
                         })
-                        
+
                         const result = await response.json()
-                        
+
                         if (result.success) {
                           console.log('[ApplyFormat] Synced', result.updated, 'emails')
-                          
+
                           // Refresh data from database
                           const { data: refreshedCCs } = await supabase
                             .from('contact_campaigns')
@@ -663,14 +684,14 @@ export default function CampaignDetailPage() {
                             `)
                             .eq('campaign_id', campaignId)
                             .order('created_at', { ascending: false })
-                          
+
                           if (refreshedCCs) {
                             setContactCampaigns(refreshedCCs.map(cc => ({
                               ...cc,
                               emails: cc.emails || []
                             })))
                           }
-                          
+
                           setSuccessMessage(`Applied format to ${result.updated} emails! Structure synced, content preserved.`)
                           setTimeout(() => setSuccessMessage(null), 4000)
                         } else {
@@ -700,7 +721,7 @@ export default function CampaignDetailPage() {
                   </button>
                 )}
                 {savedFormat && (
-                  <button 
+                  <button
                     onClick={() => setSavedFormat(null)}
                     className="text-xs text-gray-500 hover:text-gray-700"
                   >
@@ -710,20 +731,20 @@ export default function CampaignDetailPage() {
               </div>
             )}
           </div>
-          
+
           {/* Saved Format Info Banner */}
           {savedFormat && (
             <div className="px-6 py-3 bg-brand-50 border-b border-brand-100 flex items-center justify-between">
               <div className="flex items-center space-x-2">
                 <Save className="h-4 w-4 text-brand-600" />
                 <p className="text-sm text-brand-700">
-                  <strong>Format Saved:</strong> Structure from {savedFormat.savedFromContactName}'s email. 
+                  <strong>Format Saved:</strong> Structure from {savedFormat.savedFromContactName}'s email.
                   Clicking "Apply" will sync line breaks and spacing to all emails (content stays unique).
                 </p>
               </div>
             </div>
           )}
-          
+
           {contactCampaigns.length === 0 ? (
             <div className="text-center py-16">
               <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4"><Mail className="h-8 w-8 text-gray-400" /></div>
@@ -750,7 +771,7 @@ export default function CampaignDetailPage() {
                           <p className="text-sm text-gray-500">No draft generated yet</p>
                         </div>
                       </div>
-                      <button 
+                      <button
                         onClick={() => handleRegenerateDraft(cc.contact_id)}
                         className="px-3 py-1.5 bg-brand-600 text-white text-sm rounded-lg hover:bg-brand-700"
                       >
@@ -779,7 +800,7 @@ export default function CampaignDetailPage() {
                     onDelete={() => handleDeleteContact(cc.id, `${cc.contact?.first_name} ${cc.contact?.last_name}`)}
                     onSaveFormat={(format) => {
                       console.log('[CampaignPage] Saving format from email (structure only, not content)...')
-                      
+
                       // Build email body from format data
                       const emailBody: EmailJsonBody = {
                         greeting: format.bodyStructure.greeting,
@@ -790,9 +811,9 @@ export default function CampaignDetailPage() {
                         signatureMemberId: format.signatureMemberId,
                         signature: format.signature,
                       }
-                      
+
                       console.log('[CampaignPage] Format saved - will use AI to transfer structure to other emails')
-                      
+
                       // Save format with metadata (not placeholders - actual content for AI to learn from)
                       setSavedFormat({
                         templateBody: emailBody,
@@ -802,7 +823,7 @@ export default function CampaignDetailPage() {
                         savedFromContactName: cc.contact?.first_name || 'Unknown',
                         savedAt: new Date().toISOString(),
                       })
-                      
+
                       setSuccessMessage('Format saved! Click "Apply Format to All" to reformat other emails with AI (content preserved).')
                       setTimeout(() => setSuccessMessage(null), 4000)
                     }}
@@ -829,15 +850,30 @@ export default function CampaignDetailPage() {
                 <div className="text-center py-8"><Users className="h-12 w-12 text-gray-300 mx-auto mb-3" /><p className="text-gray-500">All contacts are already in this campaign</p></div>
               ) : (
                 <div className="space-y-3">
+                  {/* Filter Bar */}
+                  {contactLists.length > 0 && (
+                    <div className="mb-4">
+                      <ContactFilters
+                        contactLists={contactLists}
+                        selectedListIds={modalSelectedListIds}
+                        onListSelectionChange={setModalSelectedListIds}
+                        activeFilters={modalActiveFilters}
+                        onFiltersChange={setModalActiveFilters}
+                        totalCount={availableContacts.length}
+                        filteredCount={modalActiveFilters.length > 0 || modalSelectedListIds.length > 0 ? filteredAvailableContacts.length : undefined}
+                      />
+                    </div>
+                  )}
+
                   <div className="flex items-center justify-between pb-2 border-b border-gray-100">
-                    <span className="text-sm text-gray-500">{availableContacts.length} contact{availableContacts.length !== 1 ? 's' : ''} available</span>
+                    <span className="text-sm text-gray-500">{filteredAvailableContacts.length} contact{filteredAvailableContacts.length !== 1 ? 's' : ''} {modalActiveFilters.length > 0 || modalSelectedListIds.length > 0 ? 'matching' : 'available'}</span>
                     <div className="flex items-center space-x-2">
                       <button onClick={selectAllContacts} className="text-sm text-brand-600 hover:text-brand-700 font-medium">Select All</button>
                       <span className="text-gray-300">|</span>
                       <button onClick={unselectAllContacts} className="text-sm text-gray-500 hover:text-gray-700">Clear</button>
                     </div>
                   </div>
-                  {availableContacts.map((contact) => (
+                  {filteredAvailableContacts.map((contact) => (
                     <div key={contact.id} onClick={() => toggleContact(contact.id)} className={`flex items-center p-3 rounded-xl border-2 cursor-pointer transition-all ${selectedContacts.includes(contact.id) ? 'border-brand-500 bg-brand-50' : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'}`}>
                       <div className={`w-5 h-5 rounded border-2 mr-3 flex items-center justify-center transition-colors ${selectedContacts.includes(contact.id) ? 'bg-brand-600 border-brand-600' : 'border-gray-300'}`}>
                         {selectedContacts.includes(contact.id) && <CheckCircle className="h-3 w-3 text-white" />}
@@ -870,7 +906,7 @@ export default function CampaignDetailPage() {
           </div>
         </div>
       )}
-      
+
       {/* Batch Generation Modal */}
       <BatchGenerationModal
         isOpen={showBatchGeneration}

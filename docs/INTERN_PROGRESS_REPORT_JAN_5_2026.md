@@ -1,6 +1,6 @@
 # Internship Progress Report
 **Date:** January 5, 2026  
-**From:** [Your Name], Intern  
+**From:** Salmane, Intern  
 **To:** Management Team  
 **Re:** Day 1 - VC Outreach CRM Development Progress
 
