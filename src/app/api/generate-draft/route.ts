@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { generateCompletion, ChatMessage } from '@/lib/agents/openai-client'
-import { 
-  buildHumanEmailPrompt, 
+import {
+  buildHumanEmailPrompt,
   HUMAN_EMAIL_SYSTEM_PROMPT,
-  GOLD_STANDARD_EMAIL 
+  GOLD_STANDARD_EMAIL
 } from '@/lib/gold-standard-emails'
 import { getSignatureText } from '@/lib/signatures'
 
@@ -13,10 +13,10 @@ import { getSignatureText } from '@/lib/signatures'
 
 export async function POST(request: NextRequest) {
   try {
-    const { 
-      contact_id, 
-      campaign_id, 
-      run
+    const {
+      contact_id,
+      campaign_id,
+      run,
       signature,
       config = {}
     } = await request.json()
@@ -59,17 +59,17 @@ export async function POST(request: NextRequest) {
     // Determine sender
     const senderId = config.sender_id || campaign?.sender_id || 'jean-francois'
     const senderNames: Record<string, { name: string; role: string }> = {
-      'jean-francois': { 
-        name: 'Jean-François Manigo Gilardoni', 
-        role: 'Global Partnerships & Expansion Lead' 
+      'jean-francois': {
+        name: 'Jean-François Manigo Gilardoni',
+        role: 'Global Partnerships & Expansion Lead'
       },
-      'fahd': { 
-        name: 'Fahd El Ghorfi', 
-        role: 'Founder & CEO' 
+      'fahd': {
+        name: 'Fahd El Ghorfi',
+        role: 'Founder & CEO'
       },
-      'marcos': { 
-        name: 'Marcos Agustín Plata', 
-        role: 'CEO & Co-Founder' 
+      'marcos': {
+        name: 'Marcos Agustín Plata',
+        role: 'CEO & Co-Founder'
       },
       'salman': {
         name: 'Salman El Mehbaoui',
@@ -121,9 +121,9 @@ export async function POST(request: NextRequest) {
         content: prompt
       }
     ]
-    
-    const response = await generateCompletion(messages, { 
-      model: 'quality', 
+
+    const response = await generateCompletion(messages, {
+      model: 'quality',
       jsonMode: true,
       temperature: 0.8 // Slightly higher for more natural variation
     })
@@ -150,14 +150,14 @@ export async function POST(request: NextRequest) {
 
     // Find or create contact_campaign record
     let contactCampaignId: string | null = null
-    
+
     const { data: existingCC } = await supabase
       .from('contact_campaigns')
       .select('id')
       .eq('contact_id', contact_id)
       .eq('campaign_id', campaign_id)
       .single()
-    
+
     if (existingCC) {
       contactCampaignId = existingCC.id
     }
@@ -191,7 +191,7 @@ export async function POST(request: NextRequest) {
       // Update contact_campaign
       await supabase
         .from('contact_campaigns')
-        .update({ 
+        .update({
           confidence_score: emailData.confidence,
           sender_id: senderId,
         })
