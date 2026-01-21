@@ -10,8 +10,8 @@ RETURNS VOID AS $$
 DECLARE
     v_record_exists BOOLEAN;
 BEGIN
-    -- Check if valid field
-    IF p_field NOT IN ('sent', 'delivered', 'opened', 'clicked', 'bounced', 'complained', 'unsubscribed') THEN
+    -- Check if valid field (matches analytics_daily column names)
+    IF p_field NOT IN ('emails_sent', 'emails_delivered', 'emails_opened', 'emails_clicked', 'emails_replied', 'emails_bounced', 'unique_opens', 'unique_clicks') THEN
         RAISE EXCEPTION 'Invalid field name: %', p_field;
     END IF;
 
