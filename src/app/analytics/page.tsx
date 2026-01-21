@@ -5,7 +5,8 @@ import Link from 'next/link'
 import {
     BarChart3, TrendingUp, Mail, Users, MousePointer,
     MessageSquare, AlertTriangle, ArrowUp, ArrowDown,
-    ChevronRight, Activity, Flame, Clock
+    ChevronRight, Activity, Flame, Clock, ChevronDown,
+    CheckCircle, Calendar, XCircle
 } from 'lucide-react'
 
 // Types
@@ -71,6 +72,35 @@ interface AnalyticsData {
     }>
 }
 
+interface PipelineItem {
+    id: string
+    pipeline_stage: string
+    contact: {
+        id: string
+        first_name: string
+        last_name: string
+        email: string
+        firm: string
+        role: string
+    }
+    emails: Array<{
+        id: string
+        sent_at: string
+        opened_at: string | null
+        clicked_at: string | null
+    }>
+}
+
+const PIPELINE_STAGES = [
+    { id: 'sent', label: 'Sent', color: 'bg-gray-100 border-gray-300', textColor: 'text-gray-700' },
+    { id: 'opened', label: 'Opened', color: 'bg-blue-50 border-blue-300', textColor: 'text-blue-700' },
+    { id: 'replied', label: 'Replied', color: 'bg-green-50 border-green-300', textColor: 'text-green-700' },
+    { id: 'interested', label: 'Interested', color: 'bg-purple-50 border-purple-300', textColor: 'text-purple-700' },
+    { id: 'meeting', label: 'Meeting', color: 'bg-orange-50 border-orange-300', textColor: 'text-orange-700' },
+    { id: 'closed', label: 'Closed', color: 'bg-emerald-50 border-emerald-400', textColor: 'text-emerald-700' },
+    { id: 'not_interested', label: 'Not Interested', color: 'bg-red-50 border-red-300', textColor: 'text-red-600' },
+]
+
 // Stat card component
 function StatCard({
     icon: Icon,
@@ -102,7 +132,7 @@ function StatCard({
                 </div>
                 {trend && (
                     <div className={`flex items-center text-sm ${trend === 'up' ? 'text-green-600' :
-                            trend === 'down' ? 'text-red-600' : 'text-gray-500'
+                        trend === 'down' ? 'text-red-600' : 'text-gray-500'
                         }`}>
                         {trend === 'up' && <ArrowUp className="h-4 w-4 mr-1" />}
                         {trend === 'down' && <ArrowDown className="h-4 w-4 mr-1" />}
@@ -173,11 +203,59 @@ function getEventDisplay(eventType: string) {
     }
 }
 
+// Pipeline Card Component
+function PipelineCard({ item, onStageChange }: { item: PipelineItem, onStageChange: (id: string, stage: string) => void }) {
+    const [showDropdown, setShowDropdown] = useState(false)
+
+    return (
+        <div className="bg-white rounded-lg border border-gray-200 p-3 hover:shadow-md transition-shadow">
+            <div className="flex items-start justify-between">
+                <div className="flex-1 min-w-0">
+                    <p className="font-medium text-gray-900 text-sm truncate">
+                        {item.contact?.first_name} {item.contact?.last_name}
+                    </p>
+                    <p className="text-xs text-brand-600 truncate">{item.contact?.firm || 'No firm'}</p>
+                </div>
+                <div className="relative">
+                    <button
+                        onClick={() => setShowDropdown(!showDropdown)}
+                        className="p-1 text-gray-400 hover:text-gray-600 rounded"
+                    >
+                        <ChevronDown className="h-4 w-4" />
+                    </button>
+                    {showDropdown && (
+                        <div className="absolute right-0 top-6 z-10 bg-white rounded-lg shadow-lg border border-gray-200 py-1 min-w-[140px]">
+                            {PIPELINE_STAGES.map(stage => (
+                                <button
+                                    key={stage.id}
+                                    onClick={() => {
+                                        onStageChange(item.id, stage.id)
+                                        setShowDropdown(false)
+                                    }}
+                                    className={`w-full text-left px-3 py-1.5 text-sm hover:bg-gray-50 ${item.pipeline_stage === stage.id ? 'bg-gray-100 font-medium' : ''
+                                        }`}
+                                >
+                                    {stage.label}
+                                </button>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            </div>
+            <p className="text-xs text-gray-400 mt-1 truncate">{item.contact?.email}</p>
+        </div>
+    )
+}
+
 export default function AnalyticsPage() {
     const [data, setData] = useState<AnalyticsData | null>(null)
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState<string | null>(null)
     const [days, setDays] = useState(30)
+
+    // Pipeline state
+    const [pipeline, setPipeline] = useState<Record<string, PipelineItem[]>>({})
+    const [pipelineLoading, setPipelineLoading] = useState(false)
 
     useEffect(() => {
         async function fetchAnalytics() {
@@ -199,6 +277,58 @@ export default function AnalyticsPage() {
 
         fetchAnalytics()
     }, [days])
+
+    // Fetch pipeline data
+    useEffect(() => {
+        async function fetchPipeline() {
+            setPipelineLoading(true)
+            try {
+                const res = await fetch('/api/pipeline')
+                const json = await res.json()
+                if (json.success) {
+                    setPipeline(json.data)
+                }
+            } catch (err) {
+                console.error('Failed to load pipeline:', err)
+            } finally {
+                setPipelineLoading(false)
+            }
+        }
+
+        fetchPipeline()
+    }, [])
+
+    // Update pipeline stage
+    async function handleStageChange(contactCampaignId: string, newStage: string) {
+        try {
+            const res = await fetch('/api/pipeline', {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ contactCampaignId, stage: newStage })
+            })
+
+            if (res.ok) {
+                // Update local state
+                setPipeline(prev => {
+                    const updated = { ...prev }
+                    // Find and move the item
+                    for (const [stage, items] of Object.entries(updated)) {
+                        const idx = items.findIndex(i => i.id === contactCampaignId)
+                        if (idx !== -1) {
+                            const [item] = items.splice(idx, 1)
+                            item.pipeline_stage = newStage
+                            if (!updated[newStage]) updated[newStage] = []
+                            updated[newStage].push(item)
+                            break
+                        }
+                    }
+                    return updated
+                })
+            }
+        } catch (err) {
+            console.error('Failed to update stage:', err)
+        }
+    }
 
     if (loading) {
         return (
@@ -225,6 +355,8 @@ export default function AnalyticsPage() {
         )
     }
 
+    const totalPipelineCount = Object.values(pipeline).flat().length
+
     return (
         <div className="min-h-screen bg-gray-50">
             {/* Header */}
@@ -236,7 +368,7 @@ export default function AnalyticsPage() {
                                 <BarChart3 className="h-7 w-7 mr-3 text-brand-600" />
                                 Analytics Dashboard
                             </h1>
-                            <p className="text-gray-500 mt-1">Track email performance and engagement</p>
+                            <p className="text-gray-500 mt-1">Track email performance and VC pipeline</p>
                         </div>
 
                         {/* Time range selector */}
@@ -246,8 +378,8 @@ export default function AnalyticsPage() {
                                     key={d}
                                     onClick={() => setDays(d)}
                                     className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${days === d
-                                            ? 'bg-brand-600 text-white'
-                                            : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-50'
+                                        ? 'bg-brand-600 text-white'
+                                        : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-50'
                                         }`}
                                 >
                                     {d}d
@@ -259,8 +391,8 @@ export default function AnalyticsPage() {
             </header>
 
             <main className="max-w-7xl mx-auto px-4 py-8">
-                {/* Summary Stats */}
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                {/* Summary Stats - 3 cards (removed Reply Rate) */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
                     <StatCard
                         icon={Mail}
                         label="Emails Sent"
@@ -282,13 +414,66 @@ export default function AnalyticsPage() {
                         subValue={`${data?.totals.total_clicks || 0} clicks`}
                         color="yellow"
                     />
-                    <StatCard
-                        icon={MessageSquare}
-                        label="Reply Rate"
-                        value={`${data?.rates.reply_rate || 0}%`}
-                        subValue={`${data?.totals.total_replies || 0} replies`}
-                        color="brand"
-                    />
+                </div>
+
+                {/* VC Pipeline Kanban */}
+                <div className="bg-white rounded-xl border border-gray-200 p-6 mb-8">
+                    <div className="flex items-center justify-between mb-6">
+                        <h2 className="text-lg font-semibold text-gray-900 flex items-center">
+                            <Users className="h-5 w-5 text-brand-600 mr-2" />
+                            VC Pipeline
+                            <span className="ml-2 text-sm font-normal text-gray-500">
+                                ({totalPipelineCount} contacts)
+                            </span>
+                        </h2>
+                    </div>
+
+                    {pipelineLoading ? (
+                        <div className="flex justify-center py-12">
+                            <div className="animate-spin rounded-full h-8 w-8 border-4 border-brand-600 border-t-transparent"></div>
+                        </div>
+                    ) : totalPipelineCount === 0 ? (
+                        <div className="text-center py-12 text-gray-500">
+                            <Users className="h-12 w-12 text-gray-300 mx-auto mb-3" />
+                            <p>No contacts in pipeline yet.</p>
+                            <p className="text-sm mt-1">Send emails to VCs to populate the pipeline.</p>
+                        </div>
+                    ) : (
+                        <div className="flex gap-4 overflow-x-auto pb-4">
+                            {PIPELINE_STAGES.map(stage => {
+                                const items = pipeline[stage.id] || []
+                                return (
+                                    <div
+                                        key={stage.id}
+                                        className={`flex-shrink-0 w-56 ${stage.color} border rounded-xl p-3`}
+                                    >
+                                        <div className="flex items-center justify-between mb-3">
+                                            <h3 className={`font-medium text-sm ${stage.textColor}`}>
+                                                {stage.label}
+                                            </h3>
+                                            <span className={`text-xs px-2 py-0.5 rounded-full ${stage.color} ${stage.textColor}`}>
+                                                {items.length}
+                                            </span>
+                                        </div>
+                                        <div className="space-y-2 max-h-[400px] overflow-y-auto">
+                                            {items.map(item => (
+                                                <PipelineCard
+                                                    key={item.id}
+                                                    item={item}
+                                                    onStageChange={handleStageChange}
+                                                />
+                                            ))}
+                                            {items.length === 0 && (
+                                                <p className="text-xs text-gray-400 text-center py-4">
+                                                    No contacts
+                                                </p>
+                                            )}
+                                        </div>
+                                    </div>
+                                )
+                            })}
+                        </div>
+                    )}
                 </div>
 
                 {/* Charts and Tables */}
@@ -330,9 +515,9 @@ export default function AnalyticsPage() {
                                     </div>
                                     <div className="text-right">
                                         <span className={`inline-block px-2 py-1 rounded-full text-xs font-medium ${hc.tier === 'hot' ? 'bg-orange-100 text-orange-700' :
-                                                hc.tier === 'warm' ? 'bg-yellow-100 text-yellow-700' :
-                                                    hc.tier === 'cool' ? 'bg-blue-100 text-blue-700' :
-                                                        'bg-gray-100 text-gray-700'
+                                            hc.tier === 'warm' ? 'bg-yellow-100 text-yellow-700' :
+                                                hc.tier === 'cool' ? 'bg-blue-100 text-blue-700' :
+                                                    'bg-gray-100 text-gray-700'
                                             }`}>
                                             {hc.engagement_score}
                                         </span>
@@ -360,7 +545,6 @@ export default function AnalyticsPage() {
                                         <th className="pb-3">Campaign</th>
                                         <th className="pb-3 text-right">Sent</th>
                                         <th className="pb-3 text-right">Open</th>
-                                        <th className="pb-3 text-right">Reply</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -373,11 +557,10 @@ export default function AnalyticsPage() {
                                             </td>
                                             <td className="py-3 text-right text-gray-900">{campaign.sent}</td>
                                             <td className="py-3 text-right text-green-600">{campaign.open_rate}%</td>
-                                            <td className="py-3 text-right text-brand-600">{campaign.reply_rate}%</td>
                                         </tr>
                                     )) || (
                                             <tr>
-                                                <td colSpan={4} className="py-8 text-center text-gray-400">
+                                                <td colSpan={3} className="py-8 text-center text-gray-400">
                                                     No campaign data yet
                                                 </td>
                                             </tr>
@@ -431,3 +614,4 @@ export default function AnalyticsPage() {
         </div>
     )
 }
+
