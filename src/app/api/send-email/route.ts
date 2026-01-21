@@ -10,7 +10,7 @@ import { getBannerHtml, type EmailBanner, DEFAULT_BANNER } from '@/lib/email-for
 // ============================================
 
 // Initialize Resend
-const resend = process.env.RESEND_API_KEY 
+const resend = process.env.RESEND_API_KEY
   ? new Resend(process.env.RESEND_API_KEY)
   : null
 
@@ -63,13 +63,13 @@ export async function POST(request: NextRequest) {
   try {
     const reqBody = await request.json()
     console.log('[SEND-EMAIL] Request body:', JSON.stringify(reqBody, null, 2))
-    
+
     // Check if this is a bulk operation
     if (reqBody.action === 'bulk') {
       console.log('[SEND-EMAIL] Handling bulk send operation')
       return handleBulkSend(reqBody as BulkSendRequest)
     }
-    
+
     // Single email send
     const { email_id, dry_run = false } = reqBody as SendEmailRequest
     console.log('[SEND-EMAIL] Single email send:', { email_id, dry_run })
@@ -136,19 +136,19 @@ export async function POST(request: NextRequest) {
     //           3) campaign.sender_id, 
     //           4) default
     const emailBody = email.current_body || email.original_body
-    const senderId = emailBody?.signatureMemberId 
-      || email.contact_campaign?.sender_id 
-      || campaign?.sender_id 
+    const senderId = emailBody?.signatureMemberId
+      || email.contact_campaign?.sender_id
+      || campaign?.sender_id
       || 'jean-francois'
     const sender = getSenderFromId(senderId)
     console.log('[SEND-EMAIL] Sender:', sender, 'from signatureMemberId:', emailBody?.signatureMemberId)
 
     // Create banner config from email body settings
     console.log('[SEND-EMAIL] Banner enabled?', emailBody?.bannerEnabled, 'Using banner URL:', DEFAULT_BANNER.imageUrl)
-    const banner: EmailBanner | undefined = emailBody?.bannerEnabled 
+    const banner: EmailBanner | undefined = emailBody?.bannerEnabled
       ? { ...DEFAULT_BANNER, enabled: true }
       : undefined
-    
+
     const htmlBody = buildHtmlEmail(emailBody, contact, senderId, banner)
     const textBody = buildTextEmail(emailBody, senderId)
 
@@ -199,7 +199,7 @@ export async function POST(request: NextRequest) {
             const { data: fileData } = await supabase.storage
               .from('email-attachments')
               .download(att.storage_path)
-            
+
             if (fileData) {
               const buffer = await fileData.arrayBuffer()
               return {
@@ -235,12 +235,13 @@ export async function POST(request: NextRequest) {
     const sentAt = new Date().toISOString()
     console.log('[SEND-EMAIL] Updating database records...', { sentAt })
 
-    // Step 1: Update email record
+    // Step 1: Update email record with Resend message ID for webhook tracking
     const { error: emailUpdateError } = await supabase
       .from('emails')
-      .update({ 
+      .update({
         sent_at: sentAt,
-        approved: true 
+        approved: true,
+        resend_message_id: messageId // Store for webhook correlation
       })
       .eq('id', email_id)
 
@@ -267,7 +268,7 @@ export async function POST(request: NextRequest) {
         .from('emails')
         .update({ sent_at: null, approved: false })
         .eq('id', email_id)
-      
+
       if (rollbackError) {
         console.error('[SEND-EMAIL] CRITICAL: Rollback failed! Email marked as sent but campaign not updated:', rollbackError)
         return NextResponse.json(
@@ -275,7 +276,7 @@ export async function POST(request: NextRequest) {
           { status: 500 }
         )
       }
-      
+
       return NextResponse.json(
         { success: false, error: 'Failed to update campaign status: ' + ccUpdateError.message },
         { status: 500 }
@@ -292,7 +293,7 @@ export async function POST(request: NextRequest) {
           event_type: 'sent',
           metadata: { message_id: messageId, dry_run }
         })
-      
+
       if (eventError) {
         console.warn('[SEND-EMAIL] Failed to log engagement event (non-critical):', eventError)
       }
@@ -319,21 +320,21 @@ export async function POST(request: NextRequest) {
 function buildHtmlEmail(body: any, contact: any, senderId: string, banner?: EmailBanner): string {
   const firstName = contact?.first_name || 'there'
   const sender = getMemberById(senderId)
-  
+
   // Get the HTML signature with the logo
   const signatureHtml = getSignatureHtml(senderId, true) // true = use absolute URL
-  
+
   // Get banner HTML if enabled
   const bannerHtml = banner ? getBannerHtml(banner) : ''
-  
+
   // Convert text to HTML paragraphs
   // IMPORTANT: Preserve allowed formatting tags (<strong>, <em>, <a>) while escaping dangerous content
   const formatParagraph = (text: string) => {
     if (!text) return ''
-    
+
     // Split by double newlines for paragraph breaks
     const paragraphs = text.split(/\n\n+/).filter(p => p.trim())
-    
+
     return paragraphs.map(p => {
       // Preserve safe HTML formatting tags while escaping dangerous content
       // Step 1: Temporarily replace allowed tags with placeholders
@@ -352,24 +353,24 @@ function buildHtmlEmail(body: any, contact: any, senderId: string, banner?: Emai
         { pattern: /<a\s+href="([^"]+)"[^>]*>/gi, replacement: '<a href="$1" style="color: #0066cc; text-decoration: underline;">', placeholder: '%%LINK_OPEN_$1%%' },
         { pattern: /<\/a>/gi, replacement: '</a>', placeholder: '%%LINK_CLOSE%%' },
       ]
-      
+
       let processed = p
       const linkHrefs: string[] = []
-      
+
       // Extract and preserve links with their hrefs
       processed = processed.replace(/<a\s+href="([^"]+)"[^>]*>/gi, (match, href) => {
         linkHrefs.push(href)
         return `%%LINK_OPEN_${linkHrefs.length - 1}%%`
       })
-      
+
       // Replace other allowed tags with placeholders
       for (const tag of allowedTags.filter(t => !t.pattern.source.includes('<a'))) {
         processed = processed.replace(tag.pattern, tag.placeholder)
       }
-      
+
       // Escape dangerous HTML
       processed = escapeHtml(processed)
-      
+
       // Restore allowed tags
       processed = processed.replace(/%%STRONG_OPEN%%/g, '<strong>')
       processed = processed.replace(/%%STRONG_CLOSE%%/g, '</strong>')
@@ -382,7 +383,7 @@ function buildHtmlEmail(body: any, contact: any, senderId: string, banner?: Emai
       processed = processed.replace(/%%U_OPEN%%/g, '<u>')
       processed = processed.replace(/%%U_CLOSE%%/g, '</u>')
       processed = processed.replace(/%%LINK_CLOSE%%/g, '</a>')
-      
+
       // Restore links with their hrefs
       linkHrefs.forEach((href, index) => {
         processed = processed.replace(
@@ -390,13 +391,13 @@ function buildHtmlEmail(body: any, contact: any, senderId: string, banner?: Emai
           `<a href="${href}" style="color: #0066cc; text-decoration: underline;">`
         )
       })
-      
+
       // Convert newlines to <br>
       const formatted = processed.replace(/\n/g, '<br>')
       return `<p style="margin: 0 0 16px 0; line-height: 1.6; text-align: justify; text-justify: inter-word;">${formatted}</p>`
     }).join('')
   }
-  
+
   return `
 <!DOCTYPE html>
 <html lang="en">
@@ -451,7 +452,7 @@ function buildHtmlEmail(body: any, contact: any, senderId: string, banner?: Emai
 
 function buildTextEmail(body: any, senderId: string): string {
   const sender = getMemberById(senderId)
-  
+
   const textSignature = sender ? `
 ${sender.name}
 ${sender.title}
@@ -571,12 +572,12 @@ async function handleBulkSend(request: BulkSendRequest) {
 
       const emailBody = email.current_body || email.original_body
       const textBody = buildTextEmail(emailBody, effectiveSenderId)
-      
+
       // Create banner config from email body settings  
-      const emailBanner: EmailBanner | undefined = emailBody?.bannerEnabled 
+      const emailBanner: EmailBanner | undefined = emailBody?.bannerEnabled
         ? { ...DEFAULT_BANNER, enabled: true }
         : undefined
-      
+
       const htmlBody = buildHtmlEmail(emailBody, contact, effectiveSenderId, emailBanner)
 
       // Fetch attachments if any (same as single send)
@@ -610,7 +611,7 @@ async function handleBulkSend(request: BulkSendRequest) {
                 const { data: fileData } = await supabase.storage
                   .from('email-attachments')
                   .download(att.storage_path)
-                
+
                 if (fileData) {
                   const buffer = await fileData.arrayBuffer()
                   return {
