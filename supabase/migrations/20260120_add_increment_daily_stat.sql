@@ -37,3 +37,7 @@ $$ LANGUAGE plpgsql;
 GRANT EXECUTE ON FUNCTION increment_daily_stat(DATE, UUID, TEXT) TO authenticated;
 GRANT EXECUTE ON FUNCTION increment_daily_stat(DATE, UUID, TEXT) TO anon;
 GRANT EXECUTE ON FUNCTION increment_daily_stat(DATE, UUID, TEXT) TO service_role;
+
+-- Add replied_at column to emails table for reply tracking
+ALTER TABLE emails ADD COLUMN IF NOT EXISTS replied_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_emails_replied_at ON emails(replied_at) WHERE replied_at IS NOT NULL;

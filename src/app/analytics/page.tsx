@@ -6,7 +6,7 @@ import {
     BarChart3, TrendingUp, Mail, Users, MousePointer,
     MessageSquare, AlertTriangle, ArrowUp, ArrowDown,
     ChevronRight, Activity, Flame, Clock, ChevronDown,
-    CheckCircle, Calendar, XCircle
+    CheckCircle, Calendar, XCircle, RefreshCw
 } from 'lucide-react'
 
 // Types
@@ -252,10 +252,36 @@ export default function AnalyticsPage() {
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState<string | null>(null)
     const [days, setDays] = useState(30)
+    const [syncing, setSyncing] = useState(false)
+    const [syncMessage, setSyncMessage] = useState<string | null>(null)
 
     // Pipeline state
     const [pipeline, setPipeline] = useState<Record<string, PipelineItem[]>>({})
     const [pipelineLoading, setPipelineLoading] = useState(false)
+
+    // Sync replies function
+    async function syncReplies() {
+        setSyncing(true)
+        setSyncMessage(null)
+        try {
+            const res = await fetch('/api/sync-replies', { method: 'POST' })
+            const json = await res.json()
+            if (json.success) {
+                setSyncMessage(`✓ ${json.message}`)
+                // Refresh data
+                const dataRes = await fetch(`/api/analytics/dashboard?days=${days}`)
+                const dataJson = await dataRes.json()
+                if (dataJson.success) setData(dataJson.data)
+            } else {
+                setSyncMessage(`✗ ${json.error}`)
+            }
+        } catch (err: any) {
+            setSyncMessage(`✗ ${err.message}`)
+        } finally {
+            setSyncing(false)
+            setTimeout(() => setSyncMessage(null), 5000)
+        }
+    }
 
     useEffect(() => {
         async function fetchAnalytics() {
@@ -373,6 +399,14 @@ export default function AnalyticsPage() {
 
                         {/* Time range selector */}
                         <div className="flex items-center gap-2">
+                            <button
+                                onClick={syncReplies}
+                                disabled={syncing}
+                                className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors"
+                            >
+                                <RefreshCw className={`h-4 w-4 ${syncing ? 'animate-spin' : ''}`} />
+                                {syncing ? 'Syncing...' : 'Sync Replies'}
+                            </button>
                             {[7, 30, 90].map(d => (
                                 <button
                                     key={d}
@@ -386,6 +420,13 @@ export default function AnalyticsPage() {
                                 </button>
                             ))}
                         </div>
+                        {syncMessage && (
+                            <div className={`absolute top-full right-0 mt-2 px-4 py-2 rounded-lg text-sm ${
+                                syncMessage.startsWith('✓') ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                            }`}>
+                                {syncMessage}
+                            </div>
+                        )}
                     </div>
                 </div>
             </header>

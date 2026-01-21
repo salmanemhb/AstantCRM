@@ -148,9 +148,22 @@ export async function POST(request: NextRequest) {
                 // Update email if first click
                 const { data: clickedEmail } = await supabase
                     .from('emails')
-                    .select('clicked_at')
+                    .select('clicked_at, opened_at')
                     .eq('id', emailId)
                     .single()
+
+                // Click implies open - set opened_at if not already set
+                if (!clickedEmail?.opened_at) {
+                    await supabase
+                        .from('emails')
+                        .update({ opened_at: now })
+                        .eq('id', emailId)
+
+                    await incrementDailyStat(supabase, today, campaignId, 'emails_opened')
+                    await incrementDailyStat(supabase, today, campaignId, 'unique_opens')
+                    await logEngagementEvent(supabase, email.contact_campaign_id, emailId, 'opened')
+                    await updateContactEngagement(supabase, contactId, 'open', now)
+                }
 
                 if (!clickedEmail?.clicked_at) {
                     await supabase
