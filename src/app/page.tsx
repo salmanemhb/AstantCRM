@@ -2,11 +2,11 @@
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import {
-  Mail,
-  Users,
-  Target,
-  BarChart3,
+import { 
+  Mail, 
+  Users, 
+  Target, 
+  BarChart3, 
   ArrowRight,
   Loader2,
   FileSpreadsheet,
@@ -49,24 +49,25 @@ export default function HomePage() {
               <span className="text-xl font-bold text-gray-900">Astant Outreach</span>
             </div>
             <nav className="flex items-center space-x-4">
-              <Link
-                href="/campaigns"
+              <Link 
+                href="/campaigns" 
                 className="text-white bg-brand-600 hover:bg-brand-700 px-4 py-2 text-sm font-medium rounded-lg flex items-center space-x-1"
               >
                 <Target className="h-4 w-4" />
                 <span>Campaigns</span>
               </Link>
-              <Link
-                href="/analytics"
-                className="text-gray-600 hover:text-gray-900 px-3 py-2 text-sm font-medium"
-              >
-                Analytics
-              </Link>
-              <Link
-                href="/contacts"
+              <Link 
+                href="/contacts" 
                 className="text-gray-600 hover:text-gray-900 px-3 py-2 text-sm font-medium"
               >
                 Contacts
+              </Link>
+              <Link 
+                href="/analytics" 
+                className="text-gray-600 hover:text-gray-900 px-3 py-2 text-sm font-medium flex items-center space-x-1"
+              >
+                <BarChart3 className="h-4 w-4" />
+                <span>Analytics</span>
               </Link>
             </nav>
           </div>
@@ -80,7 +81,7 @@ export default function HomePage() {
             AI-Powered Investor Outreach
           </h1>
           <p className="text-xl text-gray-600 max-w-2xl mx-auto mb-8">
-            Import your VC contacts, generate personalized emails with AI,
+            Import your VC contacts, generate personalized emails with AI, 
             edit with full control, and send with confidence.
           </p>
           <div className="flex items-center justify-center space-x-4">

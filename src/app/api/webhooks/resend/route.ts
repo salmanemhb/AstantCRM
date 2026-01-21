@@ -283,38 +283,68 @@ async function updateContactEngagement(
 ) {
     if (!contactId) return
 
-    const updates: Record<string, any> = { updated_at: timestamp }
+    try {
+        // First, check if engagement record exists
+        const { data: existing } = await supabase
+            .from('contact_engagement')
+            .select('id, total_opens, total_clicks, total_replies, total_bounces')
+            .eq('contact_id', contactId)
+            .single()
 
-    switch (action) {
-        case 'open':
-            updates.total_opens = supabase.raw('total_opens + 1')
-            updates.last_open_at = timestamp
-            break
-        case 'click':
-            updates.total_clicks = supabase.raw('total_clicks + 1')
-            updates.last_click_at = timestamp
-            break
-        case 'reply':
-            updates.total_replies = supabase.raw('total_replies + 1')
-            updates.last_reply_at = timestamp
-            break
-        case 'bounce':
-            updates.total_bounces = supabase.raw('total_bounces + 1')
-            break
+        if (existing) {
+            // Update existing record with incremented values
+            const updates: Record<string, any> = { updated_at: timestamp }
+
+            switch (action) {
+                case 'open':
+                    updates.total_opens = (existing.total_opens || 0) + 1
+                    updates.last_open_at = timestamp
+                    break
+                case 'click':
+                    updates.total_clicks = (existing.total_clicks || 0) + 1
+                    updates.last_click_at = timestamp
+                    break
+                case 'reply':
+                    updates.total_replies = (existing.total_replies || 0) + 1
+                    updates.last_reply_at = timestamp
+                    break
+                case 'bounce':
+                    updates.total_bounces = (existing.total_bounces || 0) + 1
+                    break
+            }
+
+            await supabase
+                .from('contact_engagement')
+                .update(updates)
+                .eq('id', existing.id)
+        } else {
+            // Insert new record
+            const newRecord: Record<string, any> = {
+                contact_id: contactId,
+                updated_at: timestamp,
+                total_opens: action === 'open' ? 1 : 0,
+                total_clicks: action === 'click' ? 1 : 0,
+                total_replies: action === 'reply' ? 1 : 0,
+                total_bounces: action === 'bounce' ? 1 : 0,
+            }
+
+            if (action === 'open') newRecord.last_open_at = timestamp
+            if (action === 'click') newRecord.last_click_at = timestamp
+            if (action === 'reply') newRecord.last_reply_at = timestamp
+
+            await supabase
+                .from('contact_engagement')
+                .insert(newRecord)
+        }
+
+        // Recalculate score using RPC
+        const { error: rpcError } = await supabase.rpc('update_engagement_score', { p_contact_id: contactId })
+        if (rpcError) {
+            console.warn('[WEBHOOK] Failed to update engagement score:', rpcError)
+        }
+    } catch (err) {
+        console.error('[WEBHOOK] Error updating contact engagement:', err)
     }
-
-    // Upsert engagement record
-    await supabase
-        .from('contact_engagement')
-        .upsert({
-            contact_id: contactId,
-            ...updates
-        }, {
-            onConflict: 'contact_id'
-        })
-
-    // Recalculate score
-    await supabase.rpc('update_engagement_score', { p_contact_id: contactId })
 }
 
 // Helper: Track individual link clicks
