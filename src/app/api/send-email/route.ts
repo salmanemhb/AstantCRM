@@ -189,6 +189,11 @@ export async function POST(request: NextRequest) {
           { name: 'campaign', value: campaign?.id || 'direct' },
           { name: 'sender', value: senderId },
         ],
+        // Enable tracking for opens and clicks
+        tracking: {
+          open: true,
+          click: true,
+        },
       }
 
       // Add attachments if present
@@ -601,7 +606,12 @@ async function handleBulkSend(request: BulkSendRequest) {
             tags: [
               { name: 'campaign', value: campaign_id },
               { name: 'contact', value: contact.id }
-            ]
+            ],
+            // Enable tracking for opens and clicks
+            tracking: {
+              open: true,
+              click: true,
+            },
           }
 
           // Add attachments if present
@@ -643,7 +653,7 @@ async function handleBulkSend(request: BulkSendRequest) {
 
         await supabase
           .from('emails')
-          .update({ sent_at: sentAt, approved: true })
+          .update({ sent_at: sentAt, approved: true, resend_message_id: messageId })
           .eq('id', email.id)
 
         await supabase
