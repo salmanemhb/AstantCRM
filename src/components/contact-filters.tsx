@@ -34,13 +34,13 @@ interface ContactFiltersProps {
     filteredCount?: number
 }
 
-// Priority columns - these are the most useful for filtering
+// Priority columns - only the most essential 4 filters
 // Order matters - first ones show first
 const PRIORITY_COLUMNS = [
-    'tier_classification', 'tier', 'seniority_level', 'seniority',
-    'market_segment', 'organization_type', 'geographic_coverage', 'geography',
-    'strategic_value', 'relationship_priority', 'influence_score',
-    'editorial_focus', 'media_organization', 'reach_potential'
+    'tier_classification', 'tier',           // Tier
+    'seniority_level', 'seniority',          // Seniority  
+    'geographic_coverage', 'geography',       // Geography
+    'organization_type', 'media_organization' // Organization
 ]
 
 // Columns to always hide (not useful for filtering)
@@ -48,11 +48,13 @@ const HIDDEN_COLUMNS = [
     'contact_id', 'full_name', 'direct_email', 'email', 'mobile_phone', 'phone',
     'linkedin_profile', 'linkedin', 'manager_email', 'manager_phone',
     'director_email', 'director_phone', 'reporting_manager', 'editorial_director',
-    'last_interaction_date', 'coverage_probability', 'final_approval_authority'
+    'last_interaction_date', 'coverage_probability', 'final_approval_authority',
+    'market_segment', 'strategic_value', 'relationship_priority', 'influence_score',
+    'editorial_focus', 'reach_potential' // Moved to hidden - too granular
 ]
 
 // Maximum number of primary filters to show
-const MAX_PRIMARY_FILTERS = 5
+const MAX_PRIMARY_FILTERS = 4
 
 export default function ContactFilters({
     contactLists,

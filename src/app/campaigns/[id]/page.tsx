@@ -17,7 +17,10 @@ import {
   X,
   Sparkles,
   Copy,
-  Save
+  Save,
+  ChevronDown,
+  ChevronRight,
+  FileSpreadsheet
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { generateDraft } from '@/lib/api'
@@ -86,6 +89,8 @@ export default function CampaignDetailPage() {
   const [modalSelectedListIds, setModalSelectedListIds] = useState<string[]>([])
   const [modalActiveFilters, setModalActiveFilters] = useState<ActiveFilter[]>([])
   const [contactLists, setContactLists] = useState<{ id: string; name: string; filter_columns?: Record<string, string[]> }[]>([])
+  const [expandedSheets, setExpandedSheets] = useState<Set<string>>(new Set())
+  const [modalSearchQuery, setModalSearchQuery] = useState('')
 
   // Saved format state - stores the FORMAT/STRUCTURE to apply to other emails
   const [savedFormat, setSavedFormat] = useState<SavedFormat | null>(() => {
@@ -838,68 +843,304 @@ export default function CampaignDetailPage() {
 
       {showAddContacts && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl max-w-lg w-full max-h-[80vh] flex flex-col shadow-xl">
+          <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[90vh] flex flex-col shadow-xl">
+            {/* Header */}
             <div className="p-6 border-b border-gray-200">
-              <div className="flex items-center justify-between">
-                <div><h2 className="text-xl font-bold text-gray-900">Add VCs to Campaign</h2><p className="text-sm text-gray-500 mt-1">Select VCs to generate personalized email drafts</p></div>
-                <button onClick={() => { setShowAddContacts(false); setSelectedContacts([]) }} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg"><X className="h-5 w-5" /></button>
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h2 className="text-xl font-bold text-gray-900">Add VCs to Campaign</h2>
+                  <p className="text-sm text-gray-500 mt-1">Select VCs from your contact sheets</p>
+                </div>
+                <button onClick={() => { setShowAddContacts(false); setSelectedContacts([]); setModalSearchQuery('') }} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg">
+                  <X className="h-5 w-5" />
+                </button>
               </div>
-            </div>
-            <div className="flex-1 overflow-y-auto p-6">
-              {availableContacts.length === 0 ? (
-                <div className="text-center py-8"><Users className="h-12 w-12 text-gray-300 mx-auto mb-3" /><p className="text-gray-500">All contacts are already in this campaign</p></div>
-              ) : (
-                <div className="space-y-3">
-                  {/* Filter Bar */}
-                  {contactLists.length > 0 && (
-                    <div className="mb-4">
-                      <ContactFilters
-                        contactLists={contactLists}
-                        selectedListIds={modalSelectedListIds}
-                        onListSelectionChange={setModalSelectedListIds}
-                        activeFilters={modalActiveFilters}
-                        onFiltersChange={setModalActiveFilters}
-                        totalCount={availableContacts.length}
-                        filteredCount={modalActiveFilters.length > 0 || modalSelectedListIds.length > 0 ? filteredAvailableContacts.length : undefined}
-                      />
-                    </div>
-                  )}
+              {/* Search Bar */}
+              <div className="relative">
+                <input
+                  type="text"
+                  placeholder="Search by name, email, firm, or role..."
+                  value={modalSearchQuery}
+                  onChange={(e) => setModalSearchQuery(e.target.value)}
+                  className="w-full px-4 py-3 pl-10 border border-gray-300 rounded-xl focus:ring-2 focus:ring-brand-500 focus:border-brand-500 text-sm"
+                />
+                <svg className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+                {modalSearchQuery && (
+                  <button onClick={() => setModalSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                    <X className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
 
-                  <div className="flex items-center justify-between pb-2 border-b border-gray-100">
-                    <span className="text-sm text-gray-500">{filteredAvailableContacts.length} contact{filteredAvailableContacts.length !== 1 ? 's' : ''} {modalActiveFilters.length > 0 || modalSelectedListIds.length > 0 ? 'matching' : 'available'}</span>
-                    <div className="flex items-center space-x-2">
-                      <button onClick={selectAllContacts} className="text-sm text-brand-600 hover:text-brand-700 font-medium">Select All</button>
-                      <span className="text-gray-300">|</span>
-                      <button onClick={unselectAllContacts} className="text-sm text-gray-500 hover:text-gray-700">Clear</button>
-                    </div>
-                  </div>
-                  {filteredAvailableContacts.map((contact) => (
-                    <div key={contact.id} onClick={() => toggleContact(contact.id)} className={`flex items-center p-3 rounded-xl border-2 cursor-pointer transition-all ${selectedContacts.includes(contact.id) ? 'border-brand-500 bg-brand-50' : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'}`}>
-                      <div className={`w-5 h-5 rounded border-2 mr-3 flex items-center justify-center transition-colors ${selectedContacts.includes(contact.id) ? 'bg-brand-600 border-brand-600' : 'border-gray-300'}`}>
-                        {selectedContacts.includes(contact.id) && <CheckCircle className="h-3 w-3 text-white" />}
-                      </div>
-                      <div className="w-10 h-10 bg-brand-100 rounded-full flex items-center justify-center mr-3"><span className="text-brand-700 font-semibold text-sm">{contact.first_name[0]}{contact.last_name[0]}</span></div>
-                      <div className="flex-1"><p className="font-medium text-gray-900">{contact.first_name} {contact.last_name}</p><p className="text-sm text-gray-500">{contact.firm || contact.email}</p></div>
-                    </div>
-                  ))}
+              {/* Streamlined Filters - Only key ones */}
+              {contactLists.length > 0 && (
+                <div className="mt-4">
+                  <ContactFilters
+                    contactLists={contactLists}
+                    selectedListIds={modalSelectedListIds}
+                    onListSelectionChange={setModalSelectedListIds}
+                    activeFilters={modalActiveFilters}
+                    onFiltersChange={setModalActiveFilters}
+                    totalCount={availableContacts.length}
+                    filteredCount={modalActiveFilters.length > 0 || modalSelectedListIds.length > 0 ? filteredAvailableContacts.length : undefined}
+                  />
                 </div>
               )}
             </div>
+
+            {/* Body - Sheets Accordion */}
+            <div className="flex-1 overflow-y-auto p-6">
+              {availableContacts.length === 0 ? (
+                <div className="text-center py-12">
+                  <Users className="h-12 w-12 text-gray-300 mx-auto mb-3" />
+                  <p className="text-gray-500">All contacts are already in this campaign</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {/* Quick Stats */}
+                  <div className="flex items-center justify-between mb-4 pb-3 border-b border-gray-100">
+                    <span className="text-sm text-gray-600">
+                      <span className="font-semibold text-gray-900">{contactLists.length + (filteredAvailableContacts.some(c => !c.contact_list_id) ? 1 : 0)}</span> sources · <span className="font-semibold text-gray-900">{filteredAvailableContacts.length}</span> contacts
+                    </span>
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={() => {
+                          const allIds = new Set(contactLists.map(l => l.id))
+                          allIds.add('__manual__')
+                          setExpandedSheets(allIds)
+                        }}
+                        className="text-xs text-brand-600 hover:text-brand-700"
+                      >
+                        Expand All
+                      </button>
+                      <button
+                        onClick={() => setExpandedSheets(new Set())}
+                        className="text-xs text-gray-500 hover:text-gray-700"
+                      >
+                        Collapse All
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Sheet Accordions */}
+                  {contactLists.map((list) => {
+                    const listContacts = filteredAvailableContacts.filter(c => c.contact_list_id === list.id)
+                    const searchedContacts = modalSearchQuery
+                      ? listContacts.filter(c =>
+                        `${c.first_name} ${c.last_name} ${c.email} ${c.firm || ''} ${c.role || ''}`
+                          .toLowerCase()
+                          .includes(modalSearchQuery.toLowerCase())
+                      )
+                      : listContacts
+                    const selectedInList = searchedContacts.filter(c => selectedContacts.includes(c.id)).length
+                    const isExpanded = expandedSheets.has(list.id)
+
+                    if (searchedContacts.length === 0 && modalSearchQuery) return null
+
+                    return (
+                      <div key={list.id} className="border border-gray-200 rounded-xl overflow-hidden">
+                        {/* Sheet Header */}
+                        <button
+                          onClick={() => {
+                            const newExpanded = new Set(expandedSheets)
+                            if (isExpanded) {
+                              newExpanded.delete(list.id)
+                            } else {
+                              newExpanded.add(list.id)
+                            }
+                            setExpandedSheets(newExpanded)
+                          }}
+                          className="w-full flex items-center justify-between p-4 bg-gray-50 hover:bg-gray-100 transition-colors"
+                        >
+                          <div className="flex items-center gap-3">
+                            {isExpanded ? (
+                              <ChevronDown className="h-5 w-5 text-gray-400" />
+                            ) : (
+                              <ChevronRight className="h-5 w-5 text-gray-400" />
+                            )}
+                            <FileSpreadsheet className="h-5 w-5 text-brand-500" />
+                            <span className="font-medium text-gray-900">{list.name}</span>
+                            <span className="text-sm text-gray-500">({searchedContacts.length} contacts)</span>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            {selectedInList > 0 && (
+                              <span className="px-2 py-1 bg-brand-100 text-brand-700 text-xs font-medium rounded-full">
+                                {selectedInList} selected
+                              </span>
+                            )}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                const allIds = searchedContacts.map(c => c.id)
+                                if (selectedInList === searchedContacts.length) {
+                                  setSelectedContacts(prev => prev.filter(id => !allIds.includes(id)))
+                                } else {
+                                  setSelectedContacts(prev => Array.from(new Set([...prev, ...allIds])))
+                                }
+                              }}
+                              className="text-xs text-brand-600 hover:text-brand-700 font-medium px-2 py-1 hover:bg-brand-50 rounded"
+                            >
+                              {selectedInList === searchedContacts.length ? 'Deselect All' : 'Select All'}
+                            </button>
+                          </div>
+                        </button>
+
+                        {/* Contacts List */}
+                        {isExpanded && (
+                          <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+                            {searchedContacts.map((contact) => (
+                              <div
+                                key={contact.id}
+                                onClick={() => toggleContact(contact.id)}
+                                className={`flex items-start p-3 rounded-lg border cursor-pointer transition-all ${selectedContacts.includes(contact.id)
+                                  ? 'border-brand-500 bg-brand-50'
+                                  : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                                  }`}
+                              >
+                                <div className={`w-5 h-5 rounded border-2 mr-3 mt-0.5 flex-shrink-0 flex items-center justify-center transition-colors ${selectedContacts.includes(contact.id) ? 'bg-brand-600 border-brand-600' : 'border-gray-300'
+                                  }`}>
+                                  {selectedContacts.includes(contact.id) && <CheckCircle className="h-3 w-3 text-white" />}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <p className="font-medium text-gray-900 truncate">{contact.first_name} {contact.last_name}</p>
+                                  <p className="text-sm text-brand-600 truncate">{contact.firm || 'No firm'}</p>
+                                  <p className="text-xs text-gray-500 truncate">{contact.role || contact.email}</p>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+
+                  {/* Manual / No Sheet VCs */}
+                  {(() => {
+                    const manualContacts = filteredAvailableContacts.filter(c => !c.contact_list_id)
+                    const searchedManual = modalSearchQuery
+                      ? manualContacts.filter(c =>
+                        `${c.first_name} ${c.last_name} ${c.email} ${c.firm || ''} ${c.role || ''}`
+                          .toLowerCase()
+                          .includes(modalSearchQuery.toLowerCase())
+                      )
+                      : manualContacts
+                    const selectedInManual = searchedManual.filter(c => selectedContacts.includes(c.id)).length
+                    const isManualExpanded = expandedSheets.has('__manual__')
+
+                    if (searchedManual.length === 0) return null
+
+                    return (
+                      <div className="border border-gray-200 rounded-xl overflow-hidden">
+                        <button
+                          onClick={() => {
+                            const newExpanded = new Set(expandedSheets)
+                            if (isManualExpanded) {
+                              newExpanded.delete('__manual__')
+                            } else {
+                              newExpanded.add('__manual__')
+                            }
+                            setExpandedSheets(newExpanded)
+                          }}
+                          className="w-full flex items-center justify-between p-4 bg-gray-50 hover:bg-gray-100 transition-colors"
+                        >
+                          <div className="flex items-center gap-3">
+                            {isManualExpanded ? <ChevronDown className="h-5 w-5 text-gray-400" /> : <ChevronRight className="h-5 w-5 text-gray-400" />}
+                            <Users className="h-5 w-5 text-gray-500" />
+                            <span className="font-medium text-gray-900">Manual / No Sheet</span>
+                            <span className="text-sm text-gray-500">({searchedManual.length} contacts)</span>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            {selectedInManual > 0 && (
+                              <span className="px-2 py-1 bg-brand-100 text-brand-700 text-xs font-medium rounded-full">
+                                {selectedInManual} selected
+                              </span>
+                            )}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                const allIds = searchedManual.map(c => c.id)
+                                if (selectedInManual === searchedManual.length) {
+                                  setSelectedContacts(prev => prev.filter(id => !allIds.includes(id)))
+                                } else {
+                                  setSelectedContacts(prev => Array.from(new Set([...prev, ...allIds])))
+                                }
+                              }}
+                              className="text-xs text-brand-600 hover:text-brand-700 font-medium px-2 py-1 hover:bg-brand-50 rounded"
+                            >
+                              {selectedInManual === searchedManual.length ? 'Deselect All' : 'Select All'}
+                            </button>
+                          </div>
+                        </button>
+                        {isManualExpanded && (
+                          <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+                            {searchedManual.map((contact) => (
+                              <div
+                                key={contact.id}
+                                onClick={() => toggleContact(contact.id)}
+                                className={`flex items-start p-3 rounded-lg border cursor-pointer transition-all ${selectedContacts.includes(contact.id) ? 'border-brand-500 bg-brand-50' : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                                  }`}
+                              >
+                                <div className={`w-5 h-5 rounded border-2 mr-3 mt-0.5 flex-shrink-0 flex items-center justify-center transition-colors ${selectedContacts.includes(contact.id) ? 'bg-brand-600 border-brand-600' : 'border-gray-300'
+                                  }`}>
+                                  {selectedContacts.includes(contact.id) && <CheckCircle className="h-3 w-3 text-white" />}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <p className="font-medium text-gray-900 truncate">{contact.first_name} {contact.last_name}</p>
+                                  <p className="text-sm text-brand-600 truncate">{contact.firm || 'No firm'}</p>
+                                  <p className="text-xs text-gray-500 truncate">{contact.role || contact.email}</p>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })()}
+                </div>
+              )}
+            </div>
+
+            {/* Progress Bar */}
             {isGenerating && (
               <div className="px-6 py-4 border-t border-gray-100 bg-brand-50">
                 <div className="flex items-center space-x-3">
                   <Zap className="h-5 w-5 text-brand-600 animate-pulse" />
-                  <div className="flex-1"><p className="text-sm font-medium text-brand-900 mb-1">Generating personalized drafts...</p><div className="h-2 bg-brand-200 rounded-full overflow-hidden"><div className="h-full bg-brand-600 transition-all duration-300" style={{ width: `${generatingProgress}%` }} /></div></div>
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-brand-900 mb-1">Generating personalized drafts...</p>
+                    <div className="h-2 bg-brand-200 rounded-full overflow-hidden">
+                      <div className="h-full bg-brand-600 transition-all duration-300" style={{ width: `${generatingProgress}%` }} />
+                    </div>
+                  </div>
                   <span className="text-sm font-medium text-brand-700">{Math.round(generatingProgress)}%</span>
                 </div>
               </div>
             )}
+
+            {/* Footer */}
             <div className="p-6 border-t border-gray-200 flex justify-between items-center bg-gray-50 rounded-b-2xl">
-              <span className="text-sm text-gray-600"><span className="font-semibold">{selectedContacts.length}</span> VC{selectedContacts.length !== 1 ? 's' : ''} selected</span>
+              <span className="text-sm text-gray-600">
+                <span className="font-bold text-brand-600">{selectedContacts.length}</span> VC{selectedContacts.length !== 1 ? 's' : ''} selected
+              </span>
               <div className="flex space-x-3">
-                <button onClick={() => { setShowAddContacts(false); setSelectedContacts([]) }} disabled={isGenerating} className="px-4 py-2 text-gray-700 hover:bg-gray-200 rounded-lg transition-colors disabled:opacity-50">Cancel</button>
-                <button onClick={handleAddContacts} disabled={selectedContacts.length === 0 || isGenerating} className="flex items-center space-x-2 px-5 py-2 bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50 transition-colors">
-                  {isGenerating ? <><Loader2 className="h-4 w-4 animate-spin" /><span>Generating...</span></> : <><Zap className="h-4 w-4" /><span>Generate Drafts</span></>}
+                <button
+                  onClick={() => { setShowAddContacts(false); setSelectedContacts([]); setModalSearchQuery('') }}
+                  disabled={isGenerating}
+                  className="px-4 py-2 text-gray-700 hover:bg-gray-200 rounded-lg transition-colors disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleAddContacts}
+                  disabled={selectedContacts.length === 0 || isGenerating}
+                  className="flex items-center space-x-2 px-6 py-2 bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50 transition-colors font-medium"
+                >
+                  {isGenerating ? (
+                    <><Loader2 className="h-4 w-4 animate-spin" /><span>Generating...</span></>
+                  ) : (
+                    <><Zap className="h-4 w-4" /><span>Generate Drafts</span></>
+                  )}
                 </button>
               </div>
             </div>

@@ -349,6 +349,8 @@ function buildHtmlEmail(body: any, contact: any, senderId: string, banner?: Emai
         { pattern: /<\/i>/gi, replacement: '</em>', placeholder: '%%I_CLOSE%%' },
         { pattern: /<u>/gi, replacement: '<u>', placeholder: '%%U_OPEN%%' },
         { pattern: /<\/u>/gi, replacement: '</u>', placeholder: '%%U_CLOSE%%' },
+        // Line breaks
+        { pattern: /<br\s*\/?>/gi, replacement: '<br>', placeholder: '%%BR%%' },
         // Preserve links - capture href attribute
         { pattern: /<a\s+href="([^"]+)"[^>]*>/gi, replacement: '<a href="$1" style="color: #0066cc; text-decoration: underline;">', placeholder: '%%LINK_OPEN_$1%%' },
         { pattern: /<\/a>/gi, replacement: '</a>', placeholder: '%%LINK_CLOSE%%' },
@@ -382,6 +384,7 @@ function buildHtmlEmail(body: any, contact: any, senderId: string, banner?: Emai
       processed = processed.replace(/%%I_CLOSE%%/g, '</em>')
       processed = processed.replace(/%%U_OPEN%%/g, '<u>')
       processed = processed.replace(/%%U_CLOSE%%/g, '</u>')
+      processed = processed.replace(/%%BR%%/g, '<br>')
       processed = processed.replace(/%%LINK_CLOSE%%/g, '</a>')
 
       // Restore links with their hrefs
