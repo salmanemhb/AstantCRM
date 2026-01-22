@@ -22,6 +22,7 @@ export interface ContactList {
   file_type: 'csv' | 'xlsx' | 'xls'
   column_mapping: Record<string, string> // Maps original columns to our fields
   original_headers: string[] // Original column headers from file
+  filter_columns?: Record<string, string[]> // Filter columns with unique values
   row_count: number
   created_at: string
   // Joined
