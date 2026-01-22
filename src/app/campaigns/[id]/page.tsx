@@ -110,6 +110,55 @@ export default function CampaignDetailPage() {
   })
   const [isApplyingFormat, setIsApplyingFormat] = useState(false)
 
+  // Edit template modal state
+  const [showEditTemplate, setShowEditTemplate] = useState(false)
+  const [editSubject, setEditSubject] = useState('')
+  const [editBody, setEditBody] = useState('')
+  const [isSavingTemplate, setIsSavingTemplate] = useState(false)
+  
+  // Open edit template modal with current values
+  const openEditTemplate = () => {
+    setEditSubject(campaign?.template_subject || '')
+    setEditBody(campaign?.template_body || '')
+    setShowEditTemplate(true)
+  }
+  
+  // Save template changes to database
+  const handleSaveTemplate = async () => {
+    if (!editSubject.trim() || !editBody.trim()) {
+      setError('Subject and body are required')
+      return
+    }
+    
+    setIsSavingTemplate(true)
+    try {
+      const { error: updateError } = await supabase
+        .from('campaigns')
+        .update({
+          template_subject: editSubject,
+          template_body: editBody,
+        })
+        .eq('id', campaignId)
+      
+      if (updateError) throw updateError
+      
+      // Update local state
+      setCampaign(prev => prev ? {
+        ...prev,
+        template_subject: editSubject,
+        template_body: editBody,
+      } : null)
+      
+      setShowEditTemplate(false)
+      setSuccessMessage('Template saved! New drafts will use this template.')
+      setTimeout(() => setSuccessMessage(null), 4000)
+    } catch (err: any) {
+      setError(`Failed to save template: ${err.message}`)
+    } finally {
+      setIsSavingTemplate(false)
+    }
+  }
+
   // Persist savedFormat to localStorage whenever it changes
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -611,6 +660,13 @@ export default function CampaignDetailPage() {
               </div>
             </div>
             <div className="flex items-center space-x-3">
+              <button 
+                onClick={openEditTemplate}
+                className="flex items-center space-x-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                <Save className="h-4 w-4" />
+                <span>Edit Template</span>
+              </button>
               {availableContacts.length > 0 && (
                 <button
                   onClick={() => setShowBatchGeneration(true)}
@@ -1156,6 +1212,77 @@ export default function CampaignDetailPage() {
         contactIds={availableContacts.map(c => c.id)}
         onComplete={refreshBulkStats}
       />
+      
+      {/* Edit Template Modal */}
+      {showEditTemplate && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6 border-b border-gray-200">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xl font-bold text-gray-900">Edit Campaign Template</h2>
+                <button onClick={() => setShowEditTemplate(false)} className="p-2 hover:bg-gray-100 rounded-lg">
+                  <X className="h-5 w-5 text-gray-500" />
+                </button>
+              </div>
+              <p className="text-sm text-gray-500 mt-1">Changes will apply to new drafts. Existing drafts won't be affected.</p>
+            </div>
+            
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Subject Line</label>
+                <input
+                  type="text"
+                  value={editSubject}
+                  onChange={(e) => setEditSubject(e.target.value)}
+                  placeholder="e.g., Quick intro - Astant x [FIRM]"
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                />
+                <p className="text-xs text-gray-500 mt-1">Use [FIRST_NAME], [FIRM], [SENDER_FIRST_NAME] for placeholders</p>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Email Body Template</label>
+                <textarea
+                  value={editBody}
+                  onChange={(e) => setEditBody(e.target.value)}
+                  rows={12}
+                  placeholder="Hi [FIRST_NAME],&#10;&#10;I'm [SENDER_FIRST_NAME] from Astant Global Management..."
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500 font-mono text-sm"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Available placeholders: [FIRST_NAME], [LAST_NAME], [FIRM], [ROLE], [SENDER_FIRST_NAME], [SENDER_NAME], [SENDER_TITLE]
+                </p>
+              </div>
+            </div>
+            
+            <div className="p-6 border-t border-gray-200 flex justify-end space-x-3 bg-gray-50 rounded-b-2xl">
+              <button
+                onClick={() => setShowEditTemplate(false)}
+                className="px-4 py-2 text-gray-700 hover:bg-gray-200 rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveTemplate}
+                disabled={isSavingTemplate || !editSubject.trim() || !editBody.trim()}
+                className="flex items-center space-x-2 px-5 py-2 bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50 transition-colors"
+              >
+                {isSavingTemplate ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span>Saving...</span>
+                  </>
+                ) : (
+                  <>
+                    <Save className="h-4 w-4" />
+                    <span>Save Template</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

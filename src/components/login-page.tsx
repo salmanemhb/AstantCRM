@@ -57,7 +57,7 @@ export default function LoginPage() {
             {isLogin ? 'Welcome back' : 'Create your account'}
           </h2>
           <p className="mt-2 text-sm text-gray-600">
-            VC Outreach CRM for Astant Global Management
+            Astant CRM - Investor Outreach Platform
           </p>
         </div>
 

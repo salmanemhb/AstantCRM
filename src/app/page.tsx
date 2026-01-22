@@ -42,12 +42,10 @@ export default function HomePage() {
       <header className="bg-white border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
-            <div className="flex items-center space-x-2">
-              <div className="w-8 h-8 bg-gradient-to-br from-brand-500 to-brand-600 rounded-lg flex items-center justify-center">
-                <Mail className="h-5 w-5 text-white" />
-              </div>
-              <span className="text-xl font-bold text-gray-900">Astant Outreach</span>
-            </div>
+            <Link href="/" className="flex items-center space-x-2">
+              <img src="/astant-logo.jpg" alt="Astant" className="h-8 w-8 rounded-lg object-cover" />
+              <span className="text-xl font-bold text-gray-900">Astant CRM</span>
+            </Link>
             <nav className="flex items-center space-x-4">
               <Link 
                 href="/campaigns" 

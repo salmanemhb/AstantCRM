@@ -35,10 +35,10 @@ function escapeHtml(text: string): string {
 }
 
 // Get sender info from team members
-function getSenderFromId(senderId: string): { name: string; email: string } {
+function getSenderFromId(senderId: string): { name: string; email: string; replyTo?: string } {
   const member = TEAM_MEMBERS.find(m => m.id === senderId)
   if (member) {
-    return { name: member.name, email: member.email }
+    return { name: member.name, email: member.email, replyTo: member.replyTo }
   }
   // Default to company email for broadcasts
   return { name: DEFAULT_FROM_NAME, email: DEFAULT_FROM_EMAIL }
@@ -177,8 +177,8 @@ export async function POST(request: NextRequest) {
         subject: email.subject,
         html: htmlBody,
         text: textBody,
-        // Reply-to ensures replies go to the sender
-        reply_to: sender.email,
+        // Reply-to ensures replies go to the sender (or their preferred reply address)
+        reply_to: sender.replyTo || sender.email,
         // Headers to improve deliverability
         headers: {
           'X-Entity-Ref-ID': email_id,
@@ -259,11 +259,11 @@ export async function POST(request: NextRequest) {
     }
     console.log('[SEND-EMAIL] Email record updated successfully')
 
-    // Step 2: Update contact_campaign stage
+    // Step 2: Update contact_campaign stage and pipeline_stage
     console.log('[SEND-EMAIL] Updating contact_campaign stage...')
     const { error: ccUpdateError } = await supabase
       .from('contact_campaigns')
-      .update({ stage: 'sent' })
+      .update({ stage: 'sent', pipeline_stage: 'sent' })
       .eq('id', email.contact_campaign_id)
 
     if (ccUpdateError) {
@@ -301,6 +301,39 @@ export async function POST(request: NextRequest) {
       
       if (eventError) {
         console.warn('[SEND-EMAIL] Failed to log engagement event (non-critical):', eventError)
+      }
+    }
+
+    // Step 4: Update analytics_daily for charts (non-critical)
+    const today = new Date().toISOString().split('T')[0]
+    const campaignId = email.contact_campaign?.campaign_id
+    
+    // Try RPC first, fallback to manual upsert
+    const { error: rpcError } = await supabase.rpc('increment_daily_stat', {
+      p_date: today,
+      p_campaign_id: campaignId || null,
+      p_field: 'emails_sent'
+    })
+    
+    if (rpcError) {
+      console.warn('[SEND-EMAIL] RPC failed, trying manual upsert:', rpcError)
+      // Manual upsert fallback
+      const { data: existing } = await supabase
+        .from('analytics_daily')
+        .select('id, emails_sent')
+        .eq('date', today)
+        .eq('campaign_id', campaignId)
+        .single()
+      
+      if (existing) {
+        await supabase
+          .from('analytics_daily')
+          .update({ emails_sent: (existing.emails_sent || 0) + 1, updated_at: new Date().toISOString() })
+          .eq('id', existing.id)
+      } else {
+        await supabase
+          .from('analytics_daily')
+          .insert({ date: today, campaign_id: campaignId, emails_sent: 1 })
       }
     }
 
@@ -354,16 +387,19 @@ function buildHtmlEmail(body: any, contact: any, senderId: string, banner?: Emai
         { pattern: /<\/i>/gi, replacement: '</em>', placeholder: '%%I_CLOSE%%' },
         { pattern: /<u>/gi, replacement: '<u>', placeholder: '%%U_OPEN%%' },
         { pattern: /<\/u>/gi, replacement: '</u>', placeholder: '%%U_CLOSE%%' },
-        // Preserve links - capture href attribute
-        { pattern: /<a\s+href="([^"]+)"[^>]*>/gi, replacement: '<a href="$1" style="color: #0066cc; text-decoration: underline;">', placeholder: '%%LINK_OPEN_$1%%' },
         { pattern: /<\/a>/gi, replacement: '</a>', placeholder: '%%LINK_CLOSE%%' },
+        // Handle <br>, <br/>, and <br /> tags
+        { pattern: /<br\s*\/?>/gi, replacement: '<br>', placeholder: '%%BR%%' },
       ]
       
       let processed = p
       const linkHrefs: string[] = []
       
       // Extract and preserve links with their hrefs
-      processed = processed.replace(/<a\s+href="([^"]+)"[^>]*>/gi, (match, href) => {
+      // TipTap outputs: <a target="_blank" rel="..." class="..." href="URL">
+      // Standard HTML: <a href="URL">
+      // We need to handle BOTH formats - href can be anywhere in the tag
+      processed = processed.replace(/<a\s+[^>]*href="([^"]+)"[^>]*>/gi, (match, href) => {
         linkHrefs.push(href)
         return `%%LINK_OPEN_${linkHrefs.length - 1}%%`
       })
@@ -388,6 +424,7 @@ function buildHtmlEmail(body: any, contact: any, senderId: string, banner?: Emai
       processed = processed.replace(/%%U_OPEN%%/g, '<u>')
       processed = processed.replace(/%%U_CLOSE%%/g, '</u>')
       processed = processed.replace(/%%LINK_CLOSE%%/g, '</a>')
+      processed = processed.replace(/%%BR%%/g, '<br>')
       
       // Restore links with their hrefs
       linkHrefs.forEach((href, index) => {
@@ -602,7 +639,7 @@ async function handleBulkSend(request: BulkSendRequest) {
             subject: email.subject,
             text: textBody,
             html: htmlBody,
-            replyTo: senderInfo.email,
+            replyTo: senderInfo.replyTo || senderInfo.email,
             tags: [
               { name: 'campaign', value: campaign_id },
               { name: 'contact', value: contact.id }
@@ -658,8 +695,20 @@ async function handleBulkSend(request: BulkSendRequest) {
 
         await supabase
           .from('contact_campaigns')
-          .update({ stage: 'sent' })
+          .update({ stage: 'sent', pipeline_stage: 'sent' })
           .eq('id', email.contact_campaign.id)
+
+        // Update analytics_daily for batch sends
+        const today = new Date().toISOString().split('T')[0]
+        try {
+          await supabase.rpc('increment_daily_stat', {
+            p_date: today,
+            p_campaign_id: email.contact_campaign.campaign_id || null,
+            p_field: 'emails_sent'
+          })
+        } catch (e) {
+          // Non-critical, ignore errors
+        }
 
         results.sent++
         results.message_ids.push(messageId)

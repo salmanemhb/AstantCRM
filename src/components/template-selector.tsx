@@ -60,6 +60,10 @@ export default function TemplateSelector({ onSelect, onClose }: TemplateSelector
   const [expandedCategory, setExpandedCategory] = useState<TemplateCategory | 'custom' | null>('investor')
   const [selectedTemplate, setSelectedTemplate] = useState<EmailTemplate | null>(null)
   
+  // Editable preview state - allows modifying template before using
+  const [editedSubject, setEditedSubject] = useState('')
+  const [editedBody, setEditedBody] = useState('')
+  
   // Custom templates state
   const [customTemplates, setCustomTemplates] = useState<CustomTemplate[]>([])
   const [isLoadingCustom, setIsLoadingCustom] = useState(true)
@@ -69,6 +73,14 @@ export default function TemplateSelector({ onSelect, onClose }: TemplateSelector
   
   // Edit modal state
   const [editingTemplate, setEditingTemplate] = useState<CustomTemplate | null>(null)
+  
+  // Update edited values when template selection changes
+  useEffect(() => {
+    if (selectedTemplate) {
+      setEditedSubject(selectedTemplate.subject)
+      setEditedBody(selectedTemplate.body)
+    }
+  }, [selectedTemplate])
 
   // Fetch custom templates
   const fetchCustomTemplates = useCallback(async () => {
@@ -358,29 +370,39 @@ export default function TemplateSelector({ onSelect, onClose }: TemplateSelector
                   </div>
                 )}
 
-                {/* Subject Preview */}
+                {/* Subject - Editable */}
                 <div className="mb-4">
                   <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">
                     Subject
                   </label>
-                  <p className="text-sm text-gray-900 bg-white p-3 rounded-lg border border-gray-200">
-                    {selectedTemplate.subject}
-                  </p>
+                  <input
+                    type="text"
+                    value={editedSubject}
+                    onChange={(e) => setEditedSubject(e.target.value)}
+                    className="w-full text-sm text-gray-900 bg-white p-3 rounded-lg border border-gray-200 focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                  />
                 </div>
 
-                {/* Body Preview */}
+                {/* Body - Editable */}
                 <div className="mb-6">
                   <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">
                     Email Body
                   </label>
-                  <div className="text-sm text-gray-700 bg-white p-4 rounded-lg border border-gray-200 whitespace-pre-wrap max-h-[300px] overflow-y-auto">
-                    {selectedTemplate.body}
-                  </div>
+                  <textarea
+                    value={editedBody}
+                    onChange={(e) => setEditedBody(e.target.value)}
+                    rows={12}
+                    className="w-full text-sm text-gray-700 bg-white p-4 rounded-lg border border-gray-200 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 font-mono"
+                  />
                 </div>
 
-                {/* Use Template Button */}
+                {/* Use Template Button - passes edited values */}
                 <button
-                  onClick={() => onSelect(selectedTemplate)}
+                  onClick={() => onSelect({
+                    ...selectedTemplate,
+                    subject: editedSubject,
+                    body: editedBody,
+                  })}
                   className="w-full py-3 bg-brand-600 text-white rounded-lg font-medium hover:bg-brand-700 transition-colors"
                 >
                   Use This Template

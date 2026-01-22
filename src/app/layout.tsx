@@ -5,8 +5,13 @@ import './globals.css'
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: 'VC Outreach CRM',
-  description: 'AI-powered investor outreach platform',
+  title: 'Astant CRM',
+  description: 'AI-powered investor outreach platform by Astant',
+  icons: {
+    icon: '/astant-logo.jpg',
+    shortcut: '/astant-logo.jpg',
+    apple: '/astant-logo.jpg',
+  },
 }
 
 export default function RootLayout({

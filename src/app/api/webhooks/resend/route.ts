@@ -136,6 +136,12 @@ export async function POST(request: NextRequest) {
                         .update({ opened_at: now })
                         .eq('id', emailId)
 
+                    // Update contact_campaign stage and pipeline_stage to 'opened'
+                    await supabase
+                        .from('contact_campaigns')
+                        .update({ stage: 'opened', pipeline_stage: 'opened' })
+                        .eq('id', email.contact_campaign_id)
+
                     await incrementDailyStat(supabase, today, campaignId, 'unique_opens')
                 }
 

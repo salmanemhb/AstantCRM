@@ -13,7 +13,6 @@ import {
   Trash2,
   Target,
   Loader2,
-  Plus,
   Send,
   Clock,
   CheckCircle,
@@ -22,27 +21,47 @@ import {
   ChevronDown,
   ChevronUp,
   MessageSquare,
-  Eye,
   Calendar,
   Users
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
-import { generateDraft } from '@/lib/api'
 import type { Contact, Campaign, ContactCampaign, Email, ContactList } from '@/lib/types'
 import { formatDate, getConfidenceColor, getStageLabel } from '@/lib/utils'
 import { formatCellValue } from '@/lib/spreadsheet-parser'
 
-// Pipeline stages in order
+// Pipeline stages in order - derived from actual email state
 const PIPELINE_STAGES: { key: string; label: string; icon: React.ReactNode; color: string }[] = [
   { key: 'drafted', label: 'Drafted', icon: <Edit2 className="h-4 w-4" />, color: 'bg-gray-400' },
   { key: 'approved', label: 'Approved', icon: <CheckCircle className="h-4 w-4" />, color: 'bg-blue-500' },
   { key: 'sent', label: 'Sent', icon: <Send className="h-4 w-4" />, color: 'bg-indigo-500' },
-  { key: 'opened', label: 'Opened', icon: <Eye className="h-4 w-4" />, color: 'bg-purple-500' },
   { key: 'replied', label: 'Replied', icon: <MessageSquare className="h-4 w-4" />, color: 'bg-green-500' },
   { key: 'meeting', label: 'Meeting', icon: <Calendar className="h-4 w-4" />, color: 'bg-emerald-500' },
   { key: 'closed', label: 'Closed', icon: <CheckCircle className="h-4 w-4" />, color: 'bg-green-600' },
-  { key: 'passed', label: 'Passed', icon: <AlertCircle className="h-4 w-4" />, color: 'bg-red-500' },
 ]
+
+// Helper function to derive actual stage from email data AND stored stage
+function deriveStageFromEmails(cc: ContactCampaign & { emails?: Email[] }): string {
+  const emails = cc.emails || []
+  
+  // The pipeline_stage or stage field is the source of truth (set by manual tracking or webhooks)
+  const storedStage = cc.pipeline_stage || cc.stage
+  
+  // If we have a stored stage that's beyond 'sent', trust it
+  // This handles manual tracking updates from the Kanban board
+  if (['opened', 'replied', 'interested', 'meeting', 'closed', 'passed'].includes(storedStage)) {
+    return storedStage
+  }
+  
+  // Also check email events as backup (in case stage wasn't updated but email was)
+  const hasReplied = emails.some(e => e.replied_at)
+  const hasSent = emails.some(e => e.sent_at)
+  
+  if (hasReplied) return 'replied'
+  if (hasSent) return 'sent'
+  if (storedStage === 'approved') return 'approved'
+  
+  return 'drafted'
+}
 
 export default function ContactDetailPage() {
   const params = useParams()
@@ -50,13 +69,9 @@ export default function ContactDetailPage() {
   const contactId = params.id as string
 
   const [contact, setContact] = useState<(Contact & { contact_list?: ContactList }) | null>(null)
-  const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [contactCampaigns, setContactCampaigns] = useState<(ContactCampaign & { campaign?: Campaign; emails?: Email[] })[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isDeleting, setIsDeleting] = useState(false)
-  const [showAddToCampaign, setShowAddToCampaign] = useState(false)
-  const [selectedCampaign, setSelectedCampaign] = useState<string>('')
-  const [isGenerating, setIsGenerating] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [showAllRawData, setShowAllRawData] = useState(false)
 
@@ -78,14 +93,6 @@ export default function ContactDetailPage() {
 
         if (contactError) throw contactError
         setContact(contactData)
-
-        // Fetch all campaigns for dropdown
-        const { data: campaignsData } = await supabase
-          .from('campaigns')
-          .select('*')
-          .order('created_at', { ascending: false })
-        
-        setCampaigns(campaignsData || [])
 
         // Fetch contact's campaigns with emails
         const { data: ccData } = await supabase
@@ -150,66 +157,6 @@ export default function ContactDetailPage() {
       setError('Failed to delete contact')
     } finally {
       setIsDeleting(false)
-    }
-  }
-
-  const handleAddToCampaign = async () => {
-    if (!selectedCampaign) return
-
-    setIsGenerating(true)
-    setError(null)
-
-    try {
-      // First create unified thread
-      const { data: thread, error: threadError } = await supabase
-        .from('unified_threads')
-        .insert({
-          firm_name: contact?.firm || 'Unknown Firm',
-          status: 'active',
-        })
-        .select()
-        .single()
-
-      if (threadError) throw threadError
-
-      // Create contact_campaign record
-      const { data: cc, error: ccError } = await supabase
-        .from('contact_campaigns')
-        .insert({
-          contact_id: contactId,
-          campaign_id: selectedCampaign,
-          unified_thread_id: thread.id,
-          stage: 'drafted',
-          confidence_score: 'yellow',
-        })
-        .select(`*, campaign:campaigns (*)`)
-        .single()
-
-      if (ccError) throw ccError
-
-      // Generate draft
-      const signature = `Best regards,\n${contact?.first_name || 'Team'}\nAstant Global Management`
-      
-      const result = await generateDraft({
-        contact_id: contactId,
-        campaign_id: selectedCampaign,
-        signature,
-      })
-
-      // Refresh contact campaigns
-      const { data: updatedCc } = await supabase
-        .from('contact_campaigns')
-        .select(`*, campaign:campaigns (*), emails:emails (*)`)
-        .eq('contact_id', contactId)
-
-      setContactCampaigns(updatedCc || [])
-      setShowAddToCampaign(false)
-      setSelectedCampaign('')
-    } catch (err: any) {
-      console.error('Failed to add to campaign:', err)
-      setError(err.message || 'Failed to generate draft')
-    } finally {
-      setIsGenerating(false)
     }
   }
 
@@ -353,28 +300,23 @@ export default function ContactDetailPage() {
           {/* Campaigns & Emails */}
           <div className="lg:col-span-2">
             <div className="bg-white rounded-xl border border-gray-200 p-6">
-              <div className="flex items-center justify-between mb-6">
+              <div className="mb-6">
                 <h2 className="text-sm font-semibold text-gray-900 uppercase tracking-wider">
                   Campaigns & Emails
                 </h2>
-                <button
-                  onClick={() => setShowAddToCampaign(true)}
-                  className="flex items-center space-x-2 px-3 py-1.5 bg-brand-600 text-white text-sm rounded-lg hover:bg-brand-700"
-                >
-                  <Plus className="h-4 w-4" />
-                  <span>Add to Campaign</span>
-                </button>
               </div>
 
               {contactCampaigns.length === 0 ? (
                 <div className="text-center py-8">
                   <Mail className="h-10 w-10 text-gray-300 mx-auto mb-3" />
-                  <p className="text-gray-500 text-sm">No campaigns yet</p>
-                  <p className="text-gray-400 text-xs mt-1">Add this contact to a campaign to generate a draft</p>
+                  <p className="text-gray-500 text-sm">Not part of any campaign</p>
+                  <p className="text-gray-400 text-xs mt-1">Add this contact from the campaigns page</p>
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {contactCampaigns.map((cc) => (
+                  {contactCampaigns.map((cc) => {
+                    const derivedStage = deriveStageFromEmails(cc)
+                    return (
                     <div key={cc.id} className="border border-gray-200 rounded-lg p-4">
                       <div className="flex items-center justify-between mb-3">
                         <div className="flex items-center space-x-2">
@@ -387,8 +329,14 @@ export default function ContactDetailPage() {
                           <span className={`px-2 py-0.5 text-xs rounded-full ${getConfidenceColor(cc.confidence_score)}`}>
                             {cc.confidence_score}
                           </span>
-                          <span className="px-2 py-0.5 text-xs rounded-full bg-gray-100 text-gray-600">
-                            {getStageLabel(cc.stage)}
+                          <span className={`px-2 py-0.5 text-xs rounded-full ${
+                            derivedStage === 'replied' ? 'bg-green-100 text-green-700' :
+                            derivedStage === 'sent' ? 'bg-blue-100 text-blue-700' :
+                            derivedStage === 'meeting' ? 'bg-emerald-100 text-emerald-700' :
+                            derivedStage === 'closed' ? 'bg-green-200 text-green-800' :
+                            'bg-gray-100 text-gray-600'
+                          }`}>
+                            {getStageLabel(derivedStage)}
                           </span>
                         </div>
                       </div>
@@ -402,8 +350,13 @@ export default function ContactDetailPage() {
                                   {email.subject}
                                 </span>
                                 <div className="flex items-center space-x-2">
-                                  {email.sent_at ? (
+                                  {email.replied_at ? (
                                     <span className="flex items-center text-xs text-green-600">
+                                      <MessageSquare className="h-3 w-3 mr-1" />
+                                      Replied
+                                    </span>
+                                  ) : email.sent_at ? (
+                                    <span className="flex items-center text-xs text-blue-600">
                                       <CheckCircle className="h-3 w-3 mr-1" />
                                       Sent
                                     </span>
@@ -430,78 +383,13 @@ export default function ContactDetailPage() {
                         <p className="text-sm text-gray-400">No emails generated yet</p>
                       )}
                     </div>
-                  ))}
+                  )})}
                 </div>
               )}
             </div>
           </div>
         </div>
       </main>
-
-      {/* Add to Campaign Modal */}
-      {showAddToCampaign && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl max-w-md w-full">
-            <div className="p-6 border-b border-gray-200">
-              <h2 className="text-xl font-semibold text-gray-900">Add to Campaign</h2>
-              <p className="text-sm text-gray-500 mt-1">
-                Generate an AI-powered email draft for {contact.first_name}
-              </p>
-            </div>
-
-            <div className="p-6">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Select Campaign
-              </label>
-              <select
-                value={selectedCampaign}
-                onChange={(e) => setSelectedCampaign(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
-              >
-                <option value="">Choose a campaign...</option>
-                {campaigns.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </select>
-
-              {campaigns.length === 0 && (
-                <p className="text-sm text-gray-500 mt-2">
-                  No campaigns available. <Link href="/campaigns" className="text-brand-600">Create one first</Link>.
-                </p>
-              )}
-            </div>
-
-            <div className="p-6 border-t border-gray-200 flex justify-end space-x-3">
-              <button
-                onClick={() => {
-                  setShowAddToCampaign(false)
-                  setSelectedCampaign('')
-                }}
-                className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleAddToCampaign}
-                disabled={!selectedCampaign || isGenerating}
-                className="flex items-center space-x-2 px-4 py-2 bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50"
-              >
-                {isGenerating ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    <span>Generating...</span>
-                  </>
-                ) : (
-                  <>
-                    <Send className="h-4 w-4" />
-                    <span>Generate Draft</span>
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
@@ -512,11 +400,12 @@ function PipelineSection({
 }: { 
   contactCampaigns: (ContactCampaign & { campaign?: Campaign; emails?: Email[] })[] 
 }) {
-  // Get the furthest stage across all campaigns
-  const currentStages = contactCampaigns.map(cc => cc.stage)
+  // Derive actual stages from email data, not just the stored stage
+  const derivedStages = contactCampaigns.map(cc => deriveStageFromEmails(cc))
   const stageOrder = PIPELINE_STAGES.map(s => s.key)
   
-  const furthestStageIndex = currentStages.reduce((max, stage) => {
+  // Find the furthest stage based on derived stages
+  const furthestStageIndex = derivedStages.reduce((max, stage) => {
     const idx = stageOrder.indexOf(stage)
     return idx > max ? idx : max
   }, -1)
@@ -541,46 +430,42 @@ function PipelineSection({
         Pipeline Status
       </h2>
       
-      {/* Pipeline visualization */}
+      {/* Pipeline visualization - using a simpler approach with separate line container */}
       <div className="relative">
-        <div className="flex items-center justify-between">
-          {PIPELINE_STAGES.filter(s => s.key !== 'passed').map((stage, index) => {
-            const isActive = currentStages.includes(stage.key as any)
+        {/* Background line spanning full width */}
+        <div className="absolute top-5 left-5 right-5 h-1 bg-gray-200" />
+        
+        {/* Colored progress line */}
+        <div 
+          className="absolute top-5 left-5 h-1 bg-brand-500 transition-all duration-300"
+          style={{ 
+            width: furthestStageIndex >= 0 
+              ? `calc(${(furthestStageIndex / (PIPELINE_STAGES.length - 1)) * 100}% - 20px)` 
+              : '0%' 
+          }}
+        />
+        
+        {/* Stage circles */}
+        <div className="relative flex items-center justify-between">
+          {PIPELINE_STAGES.map((stage, index) => {
             const isPast = stageOrder.indexOf(stage.key) < furthestStageIndex
             const isCurrent = stageOrder.indexOf(stage.key) === furthestStageIndex
-            const isPassed = currentStages.includes('passed' as any) && stage.key === 'passed'
             
             return (
-              <div key={stage.key} className="flex flex-col items-center flex-1">
-                {/* Connector line */}
-                {index > 0 && (
-                  <div 
-                    className={`absolute h-1 top-5 ${
-                      isPast || isActive ? 'bg-brand-500' : 'bg-gray-200'
-                    }`}
-                    style={{
-                      left: `${(index - 1) * (100 / (PIPELINE_STAGES.length - 2)) + 50 / (PIPELINE_STAGES.length - 2)}%`,
-                      width: `${100 / (PIPELINE_STAGES.length - 2) - 2}%`,
-                    }}
-                  />
-                )}
-                
-                {/* Stage circle */}
+              <div key={stage.key} className="flex flex-col items-center">
                 <div 
-                  className={`relative z-10 w-10 h-10 rounded-full flex items-center justify-center transition-all ${
+                  className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${
                     isCurrent 
                       ? 'bg-brand-600 text-white ring-4 ring-brand-100' 
-                      : isPast || isActive
+                      : isPast
                         ? 'bg-brand-500 text-white'
                         : 'bg-gray-100 text-gray-400'
                   }`}
                 >
                   {stage.icon}
                 </div>
-                
-                {/* Stage label */}
-                <span className={`mt-2 text-xs font-medium ${
-                  isCurrent ? 'text-brand-600' : isPast || isActive ? 'text-gray-700' : 'text-gray-400'
+                <span className={`mt-2 text-xs font-medium whitespace-nowrap ${
+                  isCurrent ? 'text-brand-600' : isPast ? 'text-gray-700' : 'text-gray-400'
                 }`}>
                   {stage.label}
                 </span>
@@ -595,21 +480,24 @@ function PipelineSection({
         <div className="mt-6 pt-6 border-t border-gray-100">
           <p className="text-xs text-gray-500 mb-3">Campaigns:</p>
           <div className="flex flex-wrap gap-2">
-            {contactCampaigns.map(cc => (
-              <div 
-                key={cc.id}
-                className="flex items-center space-x-2 px-3 py-1.5 bg-gray-50 rounded-full"
-              >
-                <span className={`w-2 h-2 rounded-full ${
-                  cc.stage === 'passed' ? 'bg-red-500' :
-                  cc.stage === 'closed' || cc.stage === 'meeting' ? 'bg-green-500' :
-                  cc.stage === 'replied' ? 'bg-emerald-500' :
-                  'bg-brand-500'
-                }`} />
-                <span className="text-xs text-gray-700">{cc.campaign?.name || 'Campaign'}</span>
-                <span className="text-xs text-gray-400">• {getStageLabel(cc.stage)}</span>
-              </div>
-            ))}
+            {contactCampaigns.map(cc => {
+              const derivedStage = deriveStageFromEmails(cc)
+              return (
+                <div 
+                  key={cc.id}
+                  className="flex items-center space-x-2 px-3 py-1.5 bg-gray-50 rounded-full"
+                >
+                  <span className={`w-2 h-2 rounded-full ${
+                    derivedStage === 'closed' || derivedStage === 'meeting' ? 'bg-green-500' :
+                    derivedStage === 'replied' ? 'bg-emerald-500' :
+                    derivedStage === 'sent' ? 'bg-blue-500' :
+                    'bg-brand-500'
+                  }`} />
+                  <span className="text-xs text-gray-700">{cc.campaign?.name || 'Campaign'}</span>
+                  <span className="text-xs text-gray-400">• {getStageLabel(derivedStage)}</span>
+                </div>
+              )
+            })}
           </div>
         </div>
       )}

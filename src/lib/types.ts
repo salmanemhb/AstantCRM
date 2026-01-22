@@ -23,7 +23,6 @@ export interface ContactList {
   column_mapping: Record<string, string> // Maps original columns to our fields
   original_headers: string[] // Original column headers from file
   row_count: number
-  filter_columns?: Record<string, string[]> // Auto-detected filterable columns with unique values
   created_at: string
   // Joined
   contacts?: Contact[]
@@ -79,6 +78,7 @@ export interface ContactCampaign {
   campaign_id: string
   unified_thread_id: string
   stage: ContactStage
+  pipeline_stage?: string | null
   confidence_score: ConfidenceScore
   last_email_id: string | null
   sender_id?: string | null
@@ -110,6 +110,13 @@ export interface Email {
   last_rebuttal_enum: RebuttalType | null
   mutated_at: string | null
   sent_at: string | null
+  // Tracking fields
+  opened_at?: string | null
+  clicked_at?: string | null
+  replied_at?: string | null
+  delivered_at?: string | null
+  bounced_at?: string | null
+  resend_message_id?: string | null
   // Joined relations
   contact_campaign?: ContactCampaign
 }

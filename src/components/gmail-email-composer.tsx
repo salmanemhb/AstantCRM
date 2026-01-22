@@ -895,7 +895,7 @@ export default function GmailEmailComposer({
       {/* Collapsed Header - Gmail style */}
       <div 
         className="flex items-center justify-between p-4 cursor-pointer hover:bg-gray-50"
-        onClick={() => !isSent && setIsExpanded(!isExpanded)}
+        onClick={() => setIsExpanded(!isExpanded)}
       >
         <div className="flex items-center space-x-4 flex-1 min-w-0">
           {/* Avatar */}
@@ -954,6 +954,41 @@ export default function GmailEmailComposer({
       {/* Expanded Email Composer - Gmail style */}
       {isExpanded && (
         <div className="border-t border-gray-200">
+          {/* Tracking Status for Sent Emails */}
+          {isSent && (
+            <div className="px-4 py-3 bg-gray-50 border-b border-gray-200">
+              <div className="flex items-center space-x-6 text-sm">
+                <div className="flex items-center space-x-2">
+                  <span className="text-gray-500">Sent:</span>
+                  <span className="text-gray-900">{email.sent_at ? new Date(email.sent_at).toLocaleDateString() : '—'}</span>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <span className={email.delivered_at ? 'text-green-600' : 'text-gray-400'}>●</span>
+                  <span className="text-gray-600">Delivered</span>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <span className={email.opened_at ? 'text-blue-600' : 'text-gray-400'}>●</span>
+                  <span className="text-gray-600">Opened</span>
+                  {email.opened_at && <span className="text-xs text-gray-500">({new Date(email.opened_at).toLocaleDateString()})</span>}
+                </div>
+                <div className="flex items-center space-x-2">
+                  <span className={email.clicked_at ? 'text-purple-600' : 'text-gray-400'}>●</span>
+                  <span className="text-gray-600">Clicked</span>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <span className={email.replied_at ? 'text-green-600' : 'text-gray-400'}>●</span>
+                  <span className="text-gray-600">Replied</span>
+                </div>
+                {email.bounced_at && (
+                  <div className="flex items-center space-x-2 text-red-600">
+                    <span>●</span>
+                    <span>Bounced</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+          
           {/* To Field */}
           <div className="flex items-center px-4 py-2 border-b border-gray-100">
             <span className="text-sm text-gray-500 w-12">To:</span>

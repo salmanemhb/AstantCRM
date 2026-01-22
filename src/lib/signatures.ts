@@ -17,6 +17,7 @@ export interface TeamMember {
   title: string
   email: string
   phone?: string
+  replyTo?: string // Optional: if set, replies go to this email instead of the sender email
 }
 
 export const TEAM_MEMBERS: TeamMember[] = [
@@ -40,20 +41,6 @@ export const TEAM_MEMBERS: TeamMember[] = [
     firstName: 'Marcos',
     title: 'Chief Executive Officer & Co-Founder',
     email: 'marcos.agustin@astantglobal.com',
-  },
-  {
-    id: 'ana',
-    name: 'Ana Birkenfeld',
-    firstName: 'Ana',
-    title: 'Investment Analyst',
-    email: 'ana.birkenfeld@astantglobal.com',
-  },
-  {
-    id: 'miguel',
-    name: 'Miguel Eugene',
-    firstName: 'Miguel',
-    title: 'Investment Analyst',
-    email: 'miguel.eugene@astantglobal.com',
   },
 ]
 
