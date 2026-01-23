@@ -321,10 +321,10 @@ export function getBannerHtml(banner: EmailBanner): string {
         <tr>
           <td align="center" style="padding: 16px 20px;">
             <!--[if mso]>
-            <img src="${banner.imageUrl}" alt="${banner.altText}" width="320" height="80" style="display: block; border: 0;" />
+            <img src="${banner.imageUrl}" alt="${banner.altText}" width="560" height="140" style="display: block; border: 0;" />
             <![endif]-->
             <!--[if !mso]><!-->
-            <img src="${banner.imageUrl}" alt="${banner.altText}" width="320" height="80" style="display: block; width: 320px; height: auto; max-height: 120px; border: 0; outline: none;" />
+            <img src="${banner.imageUrl}" alt="${banner.altText}" width="560" style="display: block; width: 560px; max-width: 100%; height: auto; border: 0; outline: none;" />
             <!--<![endif]-->
           </td>
         </tr>
