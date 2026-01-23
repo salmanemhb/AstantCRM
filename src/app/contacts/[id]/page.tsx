@@ -189,9 +189,9 @@ export default function ContactDetailPage() {
         <div className="max-w-4xl mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-4">
-              <Link href="/contacts" className="text-gray-400 hover:text-gray-600">
+              <button onClick={() => router.back()} className="text-gray-400 hover:text-gray-600">
                 <ArrowLeft className="h-5 w-5" />
-              </Link>
+              </button>
               <div className="flex items-center space-x-3">
                 <div className="w-12 h-12 bg-brand-100 rounded-full flex items-center justify-center">
                   <span className="text-brand-700 font-semibold text-lg">
@@ -430,29 +430,17 @@ function PipelineSection({
         Pipeline Status
       </h2>
       
-      {/* Pipeline visualization - using a simpler approach with separate line container */}
-      <div className="relative">
-        {/* Background line spanning full width */}
-        <div className="absolute top-5 left-5 right-5 h-1 bg-gray-200" />
-        
-        {/* Colored progress line */}
-        <div 
-          className="absolute top-5 left-5 h-1 bg-brand-500 transition-all duration-300"
-          style={{ 
-            width: furthestStageIndex >= 0 
-              ? `calc(${(furthestStageIndex / (PIPELINE_STAGES.length - 1)) * 100}% - 20px)` 
-              : '0%' 
-          }}
-        />
-        
-        {/* Stage circles */}
-        <div className="relative flex items-center justify-between">
-          {PIPELINE_STAGES.map((stage, index) => {
-            const isPast = stageOrder.indexOf(stage.key) < furthestStageIndex
-            const isCurrent = stageOrder.indexOf(stage.key) === furthestStageIndex
-            
-            return (
-              <div key={stage.key} className="flex flex-col items-center">
+      {/* Pipeline visualization */}
+      <div className="flex items-start">
+        {PIPELINE_STAGES.map((stage, index) => {
+          const isPast = stageOrder.indexOf(stage.key) < furthestStageIndex
+          const isCurrent = stageOrder.indexOf(stage.key) === furthestStageIndex
+          const isLast = index === PIPELINE_STAGES.length - 1
+          
+          return (
+            <div key={stage.key} className="flex items-start flex-1 last:flex-initial">
+              {/* Stage circle and label */}
+              <div className="flex flex-col items-center">
                 <div 
                   className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${
                     isCurrent 
@@ -470,9 +458,16 @@ function PipelineSection({
                   {stage.label}
                 </span>
               </div>
-            )
-          })}
-        </div>
+              
+              {/* Connector line */}
+              {!isLast && (
+                <div className={`flex-1 h-1 mt-5 mx-1 ${
+                  isPast ? 'bg-brand-500' : 'bg-gray-200'
+                }`} />
+              )}
+            </div>
+          )
+        })}
       </div>
 
       {/* Campaign stages breakdown */}

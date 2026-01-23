@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import {
-    BarChart3, TrendingUp, Mail, Users, MousePointer,
+    BarChart3, TrendingUp, Mail, Users,
     MessageSquare, AlertTriangle, ArrowUp, ArrowDown,
     Activity, Flame, Clock, RefreshCw, Eye,
     User, Building2, Send, Search, MoreHorizontal,
@@ -21,13 +21,11 @@ interface AnalyticsData {
         total_contacts: number
         total_emails_sent: number
         total_opens: number
-        total_clicks: number
         total_replies: number
         total_bounces: number
     }
     rates: {
         open_rate: number
-        click_rate: number
         reply_rate: number
         bounce_rate: number
     }
@@ -35,7 +33,6 @@ interface AnalyticsData {
         date: string
         sent: number
         opened: number
-        clicked: number
         replied: number
     }>
     top_campaigns: Array<{
@@ -219,7 +216,7 @@ function SimpleBarChart({ data }: { data: any[] }) {
     }
 
     const maxValue = Math.max(
-        ...data.map(d => Math.max(d.sent || 0, d.opened || 0, d.clicked || 0, d.replied || 0)),
+        ...data.map(d => Math.max(d.sent || 0, d.opened || 0, d.replied || 0)),
         1
     )
 
@@ -262,7 +259,6 @@ function getEventDisplay(eventType: string) {
         case 'sent': return { icon: Send, color: 'text-blue-500 bg-blue-50', label: 'Sent' }
         case 'delivered': return { icon: Mail, color: 'text-green-500 bg-green-50', label: 'Delivered' }
         case 'opened': return { icon: Eye, color: 'text-purple-500 bg-purple-50', label: 'Opened' }
-        case 'clicked': return { icon: MousePointer, color: 'text-orange-500 bg-orange-50', label: 'Clicked' }
         case 'replied': return { icon: MessageSquare, color: 'text-green-600 bg-green-50', label: 'Replied' }
         case 'bounced': return { icon: AlertTriangle, color: 'text-red-500 bg-red-50', label: 'Bounced' }
         default: return { icon: Activity, color: 'text-gray-500 bg-gray-50', label: eventType }
@@ -331,7 +327,7 @@ function OverviewTab({
             </div>
 
             {/* Key Metrics */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-3 gap-4">
                 <StatCard
                     icon={Mail}
                     label="Emails Sent"
@@ -345,13 +341,6 @@ function OverviewTab({
                     value={data?.totals.total_opens || 0}
                     subValue={`${data?.rates.open_rate || 0}% open rate`}
                     color="blue"
-                />
-                <StatCard
-                    icon={MousePointer}
-                    label="Clicks"
-                    value={data?.totals.total_clicks || 0}
-                    subValue={`${data?.rates.click_rate || 0}% click rate`}
-                    color="yellow"
                 />
                 <StatCard
                     icon={MessageSquare}
@@ -961,12 +950,6 @@ function ContactDetailPanel({ contact }: { contact: ContactDetail }) {
                                                 <span className="inline-flex items-center gap-1 px-2 py-1 bg-purple-50 text-purple-700 text-xs rounded">
                                                     <Eye className="h-3 w-3" />
                                                     Opened {new Date(email.opened_at).toLocaleDateString()}
-                                                </span>
-                                            )}
-                                            {email.clicked_at && (
-                                                <span className="inline-flex items-center gap-1 px-2 py-1 bg-orange-50 text-orange-700 text-xs rounded">
-                                                    <MousePointer className="h-3 w-3" />
-                                                    Clicked {new Date(email.clicked_at).toLocaleDateString()}
                                                 </span>
                                             )}
                                             {email.replied_at && (

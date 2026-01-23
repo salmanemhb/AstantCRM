@@ -75,9 +75,10 @@ export async function GET(request: NextRequest) {
                 ),
                 emails (
                     id,
+                    subject,
                     sent_at,
                     opened_at,
-                    clicked_at
+                    replied_at
                 )
             `)
             .not('pipeline_stage', 'is', null)
