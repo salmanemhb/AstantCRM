@@ -20,6 +20,7 @@ import {
   Upload,
   X
 } from 'lucide-react'
+import RichTextEditor from './rich-text-editor'
 import { 
   EMAIL_TEMPLATES, 
   TEMPLATE_CATEGORIES, 
@@ -388,11 +389,10 @@ export default function TemplateSelector({ onSelect, onClose }: TemplateSelector
                   <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">
                     Email Body
                   </label>
-                  <textarea
-                    value={editedBody}
-                    onChange={(e) => setEditedBody(e.target.value)}
-                    rows={12}
-                    className="w-full text-sm text-gray-700 bg-white p-4 rounded-lg border border-gray-200 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 font-mono"
+                  <RichTextEditor
+                    content={editedBody}
+                    onChange={setEditedBody}
+                    placeholder="Write your email template here..."
                   />
                 </div>
 
@@ -672,20 +672,11 @@ function ImportTemplateModal({
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Email Body <span className="text-red-500">*</span>
                 </label>
-                <textarea
-                  value={body}
-                  onChange={(e) => setBody(e.target.value)}
-                  rows={12}
-                  placeholder={`Paste your email template here...
-
-Example:
-Hi [FIRST_NAME],
-
-I noticed {firm}'s recent focus on fintech infrastructure...
-
-Best regards,
-[SENDER_NAME]`}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500 font-mono text-sm"
+                <RichTextEditor
+                  content={body}
+                  onChange={setBody}
+                  placeholder="Paste your email template here... Use [FIRST_NAME], [FIRM], etc. for placeholders."
+                  className="min-h-[250px]"
                 />
                 <p className="text-xs text-gray-500 mt-1">
                   AI will automatically detect placeholders like [FIRST_NAME], {'{firm}'}, etc.
@@ -992,11 +983,11 @@ function EditTemplateModal({
           {/* Body */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Email Body</label>
-            <textarea
-              value={body}
-              onChange={(e) => setBody(e.target.value)}
-              rows={10}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500 font-mono text-sm"
+            <RichTextEditor
+              content={body}
+              onChange={setBody}
+              placeholder="Write your email template here..."
+              className="min-h-[250px]"
             />
           </div>
 
