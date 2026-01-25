@@ -16,6 +16,7 @@ import {
   ChevronDown,
   FileText,
   Sparkles,
+  PlayCircle,
 } from 'lucide-react'
 
 interface BulkOperationsPanelProps {
@@ -50,6 +51,8 @@ export default function BulkOperationsPanel({
     success: number
     failed: number
     total: number
+    dry_run?: boolean
+    message?: string
   } | null>(null)
 
   const executeOperation = async (operation: string, options: any = {}) => {
@@ -186,6 +189,20 @@ export default function BulkOperationsPanel({
               <span>Approve All ({stats.by_status.draft})</span>
             </button>
 
+            {/* Dry Run - Test without sending */}
+            <button
+              onClick={() => executeOperation('send_dry_run')}
+              disabled={loading !== null || stats.ready_to_send === 0}
+              className="flex items-center justify-center space-x-2 px-4 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {loading === 'send_dry_run' ? (
+                <Loader2 className="h-5 w-5 animate-spin" />
+              ) : (
+                <PlayCircle className="h-5 w-5" />
+              )}
+              <span>Dry Run ({stats.ready_to_send})</span>
+            </button>
+
             {/* Send All Approved */}
             <button
               onClick={() => {
@@ -221,18 +238,39 @@ export default function BulkOperationsPanel({
 
           {/* Result Display */}
           {result && (
-            <div className={`mt-4 p-4 rounded-lg ${result.failed > 0 ? 'bg-amber-50 border border-amber-200' : 'bg-green-50 border border-green-200'}`}>
+            <div className={`mt-4 p-4 rounded-lg ${
+              result.dry_run 
+                ? 'bg-purple-50 border border-purple-200' 
+                : result.failed > 0 
+                  ? 'bg-amber-50 border border-amber-200' 
+                  : 'bg-green-50 border border-green-200'
+            }`}>
               <div className="flex items-center space-x-2">
-                {result.failed > 0 ? (
+                {result.dry_run ? (
+                  <PlayCircle className="h-5 w-5 text-purple-600" />
+                ) : result.failed > 0 ? (
                   <AlertTriangle className="h-5 w-5 text-amber-600" />
                 ) : (
                   <CheckCircle className="h-5 w-5 text-green-600" />
                 )}
-                <span className={`font-medium ${result.failed > 0 ? 'text-amber-800' : 'text-green-800'}`}>
-                  {result.operation.replace('_', ' ').toUpperCase()}: {result.success} succeeded
-                  {result.failed > 0 && `, ${result.failed} failed`}
+                <span className={`font-medium ${
+                  result.dry_run 
+                    ? 'text-purple-800' 
+                    : result.failed > 0 
+                      ? 'text-amber-800' 
+                      : 'text-green-800'
+                }`}>
+                  {result.dry_run 
+                    ? `DRY RUN: ${result.success} emails validated (no emails sent)`
+                    : `${result.operation.replace('_', ' ').toUpperCase()}: ${result.success} succeeded${result.failed > 0 ? `, ${result.failed} failed` : ''}`
+                  }
                 </span>
               </div>
+              {result.dry_run && (
+                <p className="text-sm text-purple-600 mt-2">
+                  ✅ All emails passed validation. Click &quot;Send Approved&quot; to actually send them.
+                </p>
+              )}
             </div>
           )}
         </div>

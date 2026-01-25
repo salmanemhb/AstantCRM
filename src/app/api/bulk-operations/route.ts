@@ -10,11 +10,12 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
     const {
-      operation,      // 'approve_all' | 'approve_green' | 'send_approved' | 'regenerate_red' | 'update_signature'
+      operation,      // 'approve_all' | 'approve_green' | 'send_approved' | 'send_dry_run' | 'regenerate_red' | 'update_signature'
       campaign_id,
       email_ids,      // Optional - specific email IDs to operate on
       filter,         // Optional - 'green' | 'yellow' | 'red' | 'needs_review'
       sender_id,      // For update_signature operation
+      dry_run,        // For send operations - validates without actually sending
     } = body
 
     if (!operation || !campaign_id) {
@@ -64,12 +65,20 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'No emails found matching criteria' }, { status: 404 })
     }
 
-    let result = {
+    let result: {
+      operation: string
+      total: number
+      success: number
+      failed: number
+      errors: string[]
+      dry_run?: boolean
+      message?: string
+    } = {
       operation,
       total: emails.length,
       success: 0,
       failed: 0,
-      errors: [] as string[],
+      errors: [],
     }
 
     switch (operation) {
@@ -117,9 +126,11 @@ export async function POST(request: NextRequest) {
       }
 
       // ============================================
-      // SEND ALL APPROVED
+      // SEND ALL APPROVED (supports dry_run)
       // ============================================
+      case 'send_dry_run':
       case 'send_approved': {
+        const isDryRun = operation === 'send_dry_run' || dry_run === true
         const approvedEmails = emails.filter(e => e.approved && !e.sent_at)
         
         if (approvedEmails.length === 0) {
@@ -132,7 +143,7 @@ export async function POST(request: NextRequest) {
             const response = await fetch(`${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/send-email`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ email_id: email.id }),
+              body: JSON.stringify({ email_id: email.id, dry_run: isDryRun }),
             })
 
             if (response.ok) {
@@ -151,6 +162,10 @@ export async function POST(request: NextRequest) {
           await new Promise(resolve => setTimeout(resolve, 200))
         }
         result.total = approvedEmails.length
+        if (isDryRun) {
+          result.dry_run = true
+          result.message = `DRY RUN: ${result.success} emails validated successfully (not actually sent)`
+        }
         break
       }
 
