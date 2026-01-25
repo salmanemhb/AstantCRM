@@ -35,7 +35,7 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const body = await request.json()
-    const { name, category, subject, body: templateBody, description, created_by, detect_placeholders } = body
+    const { name, category, subject, body: templateBody, description, created_by, detect_placeholders, apply_bolding } = body
 
     if (!name || !subject || !templateBody) {
       return NextResponse.json(
@@ -111,6 +111,7 @@ Example output: ["FIRST_NAME", "FIRM", "INVESTMENT_FOCUS"]`
         subject,
         body: templateBody,
         placeholders,
+        apply_bolding: apply_bolding ?? false,
         created_by: created_by || null,
       })
       .select()
@@ -135,7 +136,7 @@ Example output: ["FIRST_NAME", "FIRM", "INVESTMENT_FOCUS"]`
 export async function PUT(request: Request) {
   try {
     const body = await request.json()
-    const { id, name, category, subject, body: templateBody, description, placeholders } = body
+    const { id, name, category, subject, body: templateBody, description, placeholders, apply_bolding } = body
 
     if (!id) {
       return NextResponse.json(
@@ -151,6 +152,7 @@ export async function PUT(request: Request) {
     if (templateBody !== undefined) updateData.body = templateBody
     if (description !== undefined) updateData.description = description
     if (placeholders !== undefined) updateData.placeholders = placeholders
+    if (apply_bolding !== undefined) updateData.apply_bolding = apply_bolding
 
     const { data, error } = await supabase
       .from('custom_templates')

@@ -38,6 +38,7 @@ interface CustomTemplate {
   subject: string
   body: string
   placeholders: string[]
+  apply_bolding: boolean
   created_by: string | null
   created_at: string
   updated_at: string
@@ -525,6 +526,7 @@ function ImportTemplateModal({
   const [subject, setSubject] = useState('')
   const [body, setBody] = useState('')
   const [category, setCategory] = useState<TemplateCategory>('investor')
+  const [applyBolding, setApplyBolding] = useState(false)
   const [detectedPlaceholders, setDetectedPlaceholders] = useState<DetectedPlaceholder[]>([])
   const [selectedPlaceholders, setSelectedPlaceholders] = useState<string[]>([])
   const [isDetecting, setIsDetecting] = useState(false)
@@ -582,6 +584,7 @@ function ImportTemplateModal({
           category,
           subject: subject || `Template: ${name}`,
           body,
+          apply_bolding: applyBolding,
           detect_placeholders: false, // We already detected them
         }),
       })
@@ -590,10 +593,11 @@ function ImportTemplateModal({
 
       const data = await res.json()
       
-      // Update with selected placeholders
+      // Update with selected placeholders and apply_bolding
       const templateWithPlaceholders = {
         ...data.template,
         placeholders: selectedPlaceholders,
+        apply_bolding: applyBolding,
       }
 
       // Update placeholders in DB
@@ -603,6 +607,7 @@ function ImportTemplateModal({
         body: JSON.stringify({
           id: data.template.id,
           placeholders: selectedPlaceholders,
+          apply_bolding: applyBolding,
         }),
       })
 
@@ -722,6 +727,27 @@ function ImportTemplateModal({
                     <option key={cat.value} value={cat.value}>{cat.label}</option>
                   ))}
                 </select>
+              </div>
+
+              {/* Bolding Engine Toggle */}
+              <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200">
+                <div>
+                  <label className="text-sm font-medium text-gray-700">Auto-Bold Keywords</label>
+                  <p className="text-xs text-gray-500 mt-0.5">Automatically bold important words like names, companies, and key terms</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setApplyBolding(!applyBolding)}
+                  className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 ${
+                    applyBolding ? 'bg-brand-600' : 'bg-gray-200'
+                  }`}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                      applyBolding ? 'translate-x-5' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
               </div>
 
               {/* Detected Placeholders */}
@@ -876,6 +902,7 @@ function EditTemplateModal({
   const [body, setBody] = useState(template.body)
   const [category, setCategory] = useState(template.category)
   const [placeholders, setPlaceholders] = useState(template.placeholders.join(', '))
+  const [applyBolding, setApplyBolding] = useState(template.apply_bolding ?? false)
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -905,6 +932,7 @@ function EditTemplateModal({
           body,
           category,
           placeholders: parsedPlaceholders,
+          apply_bolding: applyBolding,
         }),
       })
 
@@ -967,6 +995,27 @@ function EditTemplateModal({
                 <option key={cat.value} value={cat.value}>{cat.label}</option>
               ))}
             </select>
+          </div>
+
+          {/* Bolding Engine Toggle */}
+          <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200">
+            <div>
+              <label className="text-sm font-medium text-gray-700">Auto-Bold Keywords</label>
+              <p className="text-xs text-gray-500 mt-0.5">Automatically bold important words like names, companies, and key terms</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setApplyBolding(!applyBolding)}
+              className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 ${
+                applyBolding ? 'bg-brand-600' : 'bg-gray-200'
+              }`}
+            >
+              <span
+                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                  applyBolding ? 'translate-x-5' : 'translate-x-0'
+                }`}
+              />
+            </button>
           </div>
 
           {/* Subject */}
