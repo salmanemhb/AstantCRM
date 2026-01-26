@@ -135,12 +135,18 @@ export default function ImportContactsModal({ onClose, onImported }: ImportConta
 
       if (listError) throw listError
 
-      // Import contacts in batches
-      const batchSize = 50
+      // Import contacts in batches with rate limiting
+      const batchSize = 100 // Increased batch size
+      const delayBetweenBatches = 200 // ms delay to avoid rate limits
       let imported = 0
       let skipped = 0
+      let batchNumber = 0
+      const totalBatches = Math.ceil(parsedData.rows.length / batchSize)
+
+      console.log(`Starting import: ${parsedData.rows.length} rows in ${totalBatches} batches`)
 
       for (let i = 0; i < parsedData.rows.length; i += batchSize) {
+        batchNumber++
         const batch = parsedData.rows.slice(i, i + batchSize)
         
         const contacts = batch
@@ -156,24 +162,51 @@ export default function ImportContactsModal({ onClose, onImported }: ImportConta
           .filter(Boolean)
 
         if (contacts.length > 0) {
-          const { error: insertError, data: insertedData } = await supabase
-            .from('contacts')
-            .upsert(contacts, { 
-              onConflict: 'email',
-              ignoreDuplicates: true 
-            })
-            .select()
+          // Retry logic for rate limits
+          let retries = 3
+          let success = false
+          
+          while (retries > 0 && !success) {
+            const { error: insertError, data: insertedData } = await supabase
+              .from('contacts')
+              .upsert(contacts, { 
+                onConflict: 'email',
+                ignoreDuplicates: true 
+              })
+              .select()
 
-          if (insertError) {
-            console.error('Batch insert error:', insertError)
+            if (insertError) {
+              console.error(`Batch ${batchNumber}/${totalBatches} error:`, insertError)
+              if (insertError.message?.includes('rate') || insertError.code === '429') {
+                retries--
+                console.log(`Rate limited, retrying in 2s... (${retries} retries left)`)
+                await new Promise(r => setTimeout(r, 2000))
+              } else {
+                skipped += contacts.length
+                break
+              }
+            } else {
+              imported += insertedData?.length || contacts.length
+              success = true
+            }
+          }
+          
+          if (!success && retries === 0) {
             skipped += contacts.length
-          } else {
-            imported += insertedData?.length || contacts.length
           }
         }
 
         skipped += batch.length - contacts.length
         setImportProgress(Math.round(((i + batch.length) / parsedData.rows.length) * 100))
+        setImportedCount(imported)
+        setSkippedCount(skipped)
+        
+        // Small delay between batches to avoid overwhelming Supabase
+        if (i + batchSize < parsedData.rows.length) {
+          await new Promise(r => setTimeout(r, delayBetweenBatches))
+        }
+        
+        console.log(`Batch ${batchNumber}/${totalBatches}: imported ${imported}, skipped ${skipped}`)
       }
 
       // Update row count
@@ -473,9 +506,9 @@ export default function ImportContactsModal({ onClose, onImported }: ImportConta
       <div className="p-12 flex flex-col items-center">
         <Loader2 className="h-12 w-12 text-brand-600 animate-spin mb-6" />
         <p className="text-gray-900 font-medium mb-2">Importing contacts...</p>
-        <p className="text-gray-500 text-sm mb-6">This may take a moment</p>
+        <p className="text-gray-500 text-sm mb-4">Processing {parsedData?.rowCount.toLocaleString() || 0} contacts in batches</p>
         
-        <div className="w-full max-w-xs">
+        <div className="w-full max-w-xs mb-4">
           <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
             <div 
               className="h-full bg-brand-600 transition-all duration-300"
@@ -483,6 +516,17 @@ export default function ImportContactsModal({ onClose, onImported }: ImportConta
             />
           </div>
           <p className="text-center text-sm text-gray-500 mt-2">{importProgress}%</p>
+        </div>
+        
+        <div className="flex gap-6 text-sm">
+          <div className="text-center">
+            <p className="text-2xl font-bold text-green-600">{importedCount.toLocaleString()}</p>
+            <p className="text-gray-500">Imported</p>
+          </div>
+          <div className="text-center">
+            <p className="text-2xl font-bold text-orange-500">{skippedCount.toLocaleString()}</p>
+            <p className="text-gray-500">Skipped</p>
+          </div>
         </div>
       </div>
     </>
