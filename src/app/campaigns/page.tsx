@@ -343,7 +343,7 @@ function CampaignCard({ campaign, onClick, onDelete }: { campaign: Campaign; onC
               <p className="text-xs text-gray-500 uppercase font-medium mb-1">Template Preview</p>
               <p className="text-sm font-medium text-gray-900">{campaign.template_subject}</p>
               <p className="text-sm text-gray-600 line-clamp-2 mt-1">
-                {campaign.template_body?.slice(0, 150)}...
+                {stripHtml(campaign.template_body || '').slice(0, 150)}...
               </p>
             </div>
           )}
@@ -361,6 +361,19 @@ function CampaignCard({ campaign, onClick, onDelete }: { campaign: Campaign; onC
       </div>
     </div>
   )
+}
+
+// Strip HTML tags for text preview
+function stripHtml(html: string): string {
+  return html
+    .replace(/<[^>]*>/g, '') // Remove HTML tags
+    .replace(/&nbsp;/g, ' ') // Replace nbsp
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/\s+/g, ' ') // Normalize whitespace
+    .trim()
 }
 
 function StatusBadge({ status }: { status: Campaign['status'] }) {

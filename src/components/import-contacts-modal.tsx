@@ -50,7 +50,15 @@ export default function ImportContactsModal({ onClose, onImported }: ImportConta
     setError(null)
     
     try {
+      console.log('File selected:', file.name, 'Size:', file.size, 'bytes')
       const data = await parseSpreadsheet(file)
+      console.log('PARSED DATA:', {
+        headers: data.headers.length,
+        rows: data.rows.length,
+        rowCount: data.rowCount,
+        firstRow: data.rows[0],
+        lastRow: data.rows[data.rows.length - 1]
+      })
       setParsedData(data)
       setListName(file.name.replace(/\.[^/.]+$/, '')) // Remove extension
       
@@ -167,13 +175,14 @@ export default function ImportContactsModal({ onClose, onImported }: ImportConta
           let success = false
           
           while (retries > 0 && !success) {
-            const { error: insertError, data: insertedData } = await supabase
+            // Don't use .select() - Supabase has 1000 row return limit
+            // Just count what we sent and check for errors
+            const { error: insertError } = await supabase
               .from('contacts')
               .upsert(contacts, { 
                 onConflict: 'email',
-                ignoreDuplicates: true 
+                ignoreDuplicates: false // Allow updates to existing
               })
-              .select()
 
             if (insertError) {
               console.error(`Batch ${batchNumber}/${totalBatches} error:`, insertError)
@@ -186,7 +195,7 @@ export default function ImportContactsModal({ onClose, onImported }: ImportConta
                 break
               }
             } else {
-              imported += insertedData?.length || contacts.length
+              imported += contacts.length
               success = true
             }
           }
