@@ -29,6 +29,8 @@ export interface EmailTemplate {
   subject_template: string
   body_template: string
   recommendedSender?: string
+  // Bolding engine setting
+  apply_bolding?: boolean
 }
 
 // Template categories for UI

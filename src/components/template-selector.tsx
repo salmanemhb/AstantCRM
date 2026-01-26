@@ -65,6 +65,7 @@ export default function TemplateSelector({ onSelect, onClose }: TemplateSelector
   // Editable preview state - allows modifying template before using
   const [editedSubject, setEditedSubject] = useState('')
   const [editedBody, setEditedBody] = useState('')
+  const [previewApplyBolding, setPreviewApplyBolding] = useState(false)
   
   // Custom templates state
   const [customTemplates, setCustomTemplates] = useState<CustomTemplate[]>([])
@@ -386,7 +387,7 @@ export default function TemplateSelector({ onSelect, onClose }: TemplateSelector
                 </div>
 
                 {/* Body - Editable */}
-                <div className="mb-6">
+                <div className="mb-4">
                   <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">
                     Email Body
                   </label>
@@ -397,12 +398,34 @@ export default function TemplateSelector({ onSelect, onClose }: TemplateSelector
                   />
                 </div>
 
+                {/* Bolding Engine Toggle */}
+                <div className="flex items-center justify-between p-3 mb-4 bg-gray-50 rounded-lg border border-gray-200">
+                  <div>
+                    <label className="text-sm font-medium text-gray-700">Auto-Bold Keywords</label>
+                    <p className="text-xs text-gray-500 mt-0.5">Bold important words like names and companies</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setPreviewApplyBolding(!previewApplyBolding)}
+                    className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 ${
+                      previewApplyBolding ? 'bg-brand-600' : 'bg-gray-200'
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                        previewApplyBolding ? 'translate-x-5' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
+                </div>
+
                 {/* Use Template Button - passes edited values */}
                 <button
                   onClick={() => onSelect({
                     ...selectedTemplate,
                     subject: editedSubject,
                     body: editedBody,
+                    apply_bolding: previewApplyBolding,
                   })}
                   className="w-full py-3 bg-brand-600 text-white rounded-lg font-medium hover:bg-brand-700 transition-colors"
                 >
