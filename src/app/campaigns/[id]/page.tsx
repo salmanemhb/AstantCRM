@@ -96,6 +96,10 @@ export default function CampaignDetailPage() {
   const [mainActiveFilters, setMainActiveFilters] = useState<ActiveFilter[]>([])
   const [mainSelectedListIds, setMainSelectedListIds] = useState<string[]>([])
   const [mainSearchQuery, setMainSearchQuery] = useState('')
+  
+  // Batch add mode - add contacts without generating drafts immediately
+  const [batchAddMode, setBatchAddMode] = useState(false)
+  const [isAddingContacts, setIsAddingContacts] = useState(false)
 
   // Saved format state - stores the FORMAT/STRUCTURE to apply to other emails
   const [savedFormat, setSavedFormat] = useState<SavedFormat | null>(() => {
@@ -439,6 +443,92 @@ export default function CampaignDetailPage() {
       setError(err.message || 'Failed to generate drafts')
     } finally {
       setIsGenerating(false)
+    }
+  }
+
+  // Add contacts to campaign WITHOUT generating drafts (for batch generation later)
+  const handleAddContactsOnly = async () => {
+    if (selectedContacts.length === 0) return
+    
+    setIsAddingContacts(true)
+    setError(null)
+    
+    try {
+      // Re-fetch existing contact_campaigns to avoid stale data
+      const { data: existingCCs } = await supabase
+        .from('contact_campaigns')
+        .select('contact_id')
+        .eq('campaign_id', campaignId)
+
+      const existingContactIds = existingCCs?.map(cc => cc.contact_id) || []
+      const newContacts = selectedContacts.filter(id => !existingContactIds.includes(id))
+
+      if (newContacts.length === 0) {
+        setSuccessMessage('All selected contacts are already in this campaign')
+        setTimeout(() => setSuccessMessage(null), 3000)
+        setIsAddingContacts(false)
+        return
+      }
+
+      // Add contacts in batches for better performance
+      const batchSize = 50
+      let added = 0
+      
+      for (let i = 0; i < newContacts.length; i += batchSize) {
+        const batch = newContacts.slice(i, i + batchSize)
+        
+        // Create unified threads and contact_campaigns in parallel
+        const insertPromises = batch.map(async (contactId) => {
+          const contact = contacts.find(c => c.id === contactId)
+          
+          const { data: thread } = await supabase
+            .from('unified_threads')
+            .insert({ firm_name: contact?.firm || 'Unknown Firm', status: 'active' })
+            .select()
+            .single()
+          
+          if (!thread) return null
+          
+          const { data: cc } = await supabase
+            .from('contact_campaigns')
+            .insert({
+              contact_id: contactId,
+              campaign_id: campaignId,
+              unified_thread_id: thread.id,
+              stage: 'drafted', // Will show as "No draft generated yet"
+              confidence_score: 'yellow',
+            })
+            .select()
+            .single()
+          
+          return cc
+        })
+        
+        const results = await Promise.all(insertPromises)
+        added += results.filter(Boolean).length
+        
+        setGeneratingProgress(Math.round(((i + batch.length) / newContacts.length) * 100))
+      }
+
+      // Refresh data
+      const { data: updatedCc } = await supabase
+        .from('contact_campaigns')
+        .select(`*, contact:contacts (*), emails:emails (*)`)
+        .eq('campaign_id', campaignId)
+        .order('updated_at', { ascending: true })
+      setContactCampaigns(updatedCc || [])
+      
+      setShowAddContacts(false)
+      setSelectedContacts([])
+      setBatchAddMode(false)
+      setGeneratingProgress(0)
+
+      setSuccessMessage(`Added ${added} contacts! Use "Generate Drafts" button to batch generate emails.`)
+      setTimeout(() => setSuccessMessage(null), 5000)
+    } catch (err: any) {
+      setError(err.message || 'Failed to add contacts')
+    } finally {
+      setIsAddingContacts(false)
     }
   }
 
@@ -1255,12 +1345,14 @@ export default function CampaignDetailPage() {
             </div>
 
             {/* Progress Bar */}
-            {isGenerating && (
+            {(isGenerating || isAddingContacts) && (
               <div className="px-6 py-4 border-t border-gray-100 bg-brand-50">
                 <div className="flex items-center space-x-3">
                   <Zap className="h-5 w-5 text-brand-600 animate-pulse" />
                   <div className="flex-1">
-                    <p className="text-sm font-medium text-brand-900 mb-1">Generating personalized drafts...</p>
+                    <p className="text-sm font-medium text-brand-900 mb-1">
+                      {isGenerating ? 'Generating personalized drafts...' : 'Adding contacts to campaign...'}
+                    </p>
                     <div className="h-2 bg-brand-200 rounded-full overflow-hidden">
                       <div className="h-full bg-brand-600 transition-all duration-300" style={{ width: `${generatingProgress}%` }} />
                     </div>
@@ -1271,27 +1363,49 @@ export default function CampaignDetailPage() {
             )}
 
             {/* Footer */}
-            <div className="p-6 border-t border-gray-200 flex justify-between items-center bg-gray-50 rounded-b-2xl">
-              <span className="text-sm text-gray-600">
-                <span className="font-bold text-brand-600">{selectedContacts.length}</span> VC{selectedContacts.length !== 1 ? 's' : ''} selected
-              </span>
-              <div className="flex space-x-3">
+            <div className="p-6 border-t border-gray-200 bg-gray-50 rounded-b-2xl">
+              <div className="flex justify-between items-center mb-3">
+                <span className="text-sm text-gray-600">
+                  <span className="font-bold text-brand-600">{selectedContacts.length}</span> VC{selectedContacts.length !== 1 ? 's' : ''} selected
+                </span>
+                {selectedContacts.length > 20 && (
+                  <span className="text-xs text-amber-600 bg-amber-50 px-2 py-1 rounded">
+                    Tip: For large selections, use "Add Only" then batch generate
+                  </span>
+                )}
+              </div>
+              <div className="flex justify-end space-x-3">
                 <button
                   onClick={() => { setShowAddContacts(false); setSelectedContacts([]); setModalSearchQuery('') }}
-                  disabled={isGenerating}
+                  disabled={isGenerating || isAddingContacts}
                   className="px-4 py-2 text-gray-700 hover:bg-gray-200 rounded-lg transition-colors disabled:opacity-50"
                 >
                   Cancel
                 </button>
+                {/* Add Only button - for large batches */}
+                <button
+                  onClick={handleAddContactsOnly}
+                  disabled={selectedContacts.length === 0 || isGenerating || isAddingContacts}
+                  className="flex items-center space-x-2 px-4 py-2 border border-brand-600 text-brand-600 rounded-lg hover:bg-brand-50 disabled:opacity-50 transition-colors font-medium"
+                  title="Add contacts without generating drafts - use batch generation after"
+                >
+                  {isAddingContacts ? (
+                    <><Loader2 className="h-4 w-4 animate-spin" /><span>Adding...</span></>
+                  ) : (
+                    <><Plus className="h-4 w-4" /><span>Add Only ({selectedContacts.length})</span></>
+                  )}
+                </button>
+                {/* Add & Generate button - for small batches */}
                 <button
                   onClick={handleAddContacts}
-                  disabled={selectedContacts.length === 0 || isGenerating}
+                  disabled={selectedContacts.length === 0 || selectedContacts.length > 50 || isGenerating || isAddingContacts}
                   className="flex items-center space-x-2 px-6 py-2 bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50 transition-colors font-medium"
+                  title={selectedContacts.length > 50 ? 'Use "Add Only" for large selections' : 'Add contacts and generate drafts'}
                 >
                   {isGenerating ? (
                     <><Loader2 className="h-4 w-4 animate-spin" /><span>Generating...</span></>
                   ) : (
-                    <><Zap className="h-4 w-4" /><span>Generate Drafts</span></>
+                    <><Zap className="h-4 w-4" /><span>Add & Generate{selectedContacts.length > 50 ? ' (max 50)' : ''}</span></>
                   )}
                 </button>
               </div>

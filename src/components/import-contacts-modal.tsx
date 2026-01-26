@@ -19,6 +19,7 @@ import {
   extractContact,
   formatHeader,
   formatCellValue,
+  extractFilterColumns,
   type ParsedSpreadsheet,
   type ColumnMapping 
 } from '@/lib/spreadsheet-parser'
@@ -127,7 +128,11 @@ export default function ImportContactsModal({ onClose, onImported }: ImportConta
     setError(null)
 
     try {
-      // Create contact list
+      // Extract filter columns from the spreadsheet data for filtering UI
+      const filterColumns = extractFilterColumns(parsedData.rows, parsedData.headers)
+      console.log('Extracted filter columns:', Object.keys(filterColumns).length, 'columns')
+      
+      // Create contact list with filter_columns
       const { data: contactList, error: listError } = await supabase
         .from('contact_lists')
         .insert({
@@ -137,6 +142,7 @@ export default function ImportContactsModal({ onClose, onImported }: ImportConta
           column_mapping: mapping,
           original_headers: parsedData.headers,
           row_count: parsedData.rowCount,
+          filter_columns: filterColumns, // Add filter columns for filtering UI
         })
         .select()
         .single()

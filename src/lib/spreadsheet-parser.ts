@@ -376,3 +376,96 @@ export function formatCellValue(value: any): string {
   }
   return String(value)
 }
+
+// Columns that are good for filtering (categorical data, not unique per row)
+const FILTERABLE_COLUMNS = [
+  'tier', 'tier_classification', 'seniority', 'seniority_level',
+  'geography', 'geographic_coverage', 'region', 'country', 'city', 'location',
+  'sector', 'sectors', 'focus', 'investment_focus', 'stage', 'investment_stage',
+  'type', 'organization_type', 'firm_type', 'fund_type',
+  'status', 'priority', 'category', 'segment', 'market_segment',
+  'role', 'title', 'position', 'department',
+]
+
+// Columns to exclude from filtering (too unique or not useful)
+const EXCLUDED_FILTER_COLUMNS = [
+  'email', 'e-mail', 'phone', 'mobile', 'linkedin', 'twitter',
+  'first_name', 'last_name', 'firstname', 'lastname', 'name', 'full_name',
+  'notes', 'comments', 'description', 'bio', 'about',
+  'id', 'contact_id', 'row_id', 'index',
+  'date', 'created', 'updated', 'last_interaction',
+  'url', 'website', 'link', 'profile',
+]
+
+/**
+ * Extract filter columns with unique values from spreadsheet data
+ * Returns a Record<column_name, unique_values[]> for columns suitable for filtering
+ */
+export function extractFilterColumns(
+  rows: Record<string, any>[],
+  headers: string[],
+  maxUniqueValues: number = 50 // Don't include columns with too many unique values
+): Record<string, string[]> {
+  const filterColumns: Record<string, Set<string>> = {}
+  
+  // Initialize sets for each header
+  for (const header of headers) {
+    const normalizedHeader = header.toLowerCase().replace(/[^a-z0-9]/g, '_')
+    
+    // Skip excluded columns
+    if (EXCLUDED_FILTER_COLUMNS.some(exc => 
+      normalizedHeader.includes(exc) || exc.includes(normalizedHeader)
+    )) {
+      continue
+    }
+    
+    filterColumns[header] = new Set()
+  }
+  
+  // Collect unique values from each row
+  for (const row of rows) {
+    for (const header of Object.keys(filterColumns)) {
+      const value = row[header]
+      if (value !== null && value !== undefined && value !== '') {
+        const strValue = String(value).trim()
+        if (strValue && strValue.length < 100) { // Skip very long values
+          filterColumns[header].add(strValue)
+        }
+      }
+    }
+  }
+  
+  // Filter out columns with too many unique values (not useful for filtering)
+  // and columns with only 1 unique value (no variation)
+  const result: Record<string, string[]> = {}
+  
+  for (const [header, values] of Object.entries(filterColumns)) {
+    const uniqueCount = values.size
+    if (uniqueCount >= 2 && uniqueCount <= maxUniqueValues) {
+      // Sort values naturally (handles numbers in strings)
+      result[header] = Array.from(values).sort((a, b) => 
+        a.localeCompare(b, undefined, { numeric: true })
+      )
+    }
+  }
+  
+  // Prioritize columns that match known filterable patterns
+  const prioritized: Record<string, string[]> = {}
+  const other: Record<string, string[]> = {}
+  
+  for (const [header, values] of Object.entries(result)) {
+    const normalizedHeader = header.toLowerCase().replace(/[^a-z0-9]/g, '_')
+    const isPriority = FILTERABLE_COLUMNS.some(fc => 
+      normalizedHeader.includes(fc) || fc.includes(normalizedHeader)
+    )
+    
+    if (isPriority) {
+      prioritized[header] = values
+    } else {
+      other[header] = values
+    }
+  }
+  
+  // Return prioritized columns first, then others
+  return { ...prioritized, ...other }
+}
