@@ -103,80 +103,96 @@ async function parseExcel(
     reader.onload = (e) => {
       try {
         const data = new Uint8Array(e.target?.result as ArrayBuffer)
-        const workbook = XLSX.read(data, { type: 'array' })
-        
-        // Get first sheet
-        const sheetName = workbook.SheetNames[0]
-        const sheet = workbook.Sheets[sheetName]
-        
-        // First, get raw data to find the header row
-        const rawData = XLSX.utils.sheet_to_json<any[]>(sheet, {
-          header: 1, // Get as array of arrays
-          defval: '',
+        const workbook = XLSX.read(data, { 
+          type: 'array',
+          sheetRows: 0, // Read ALL rows (no limit)
         })
         
-        // Find the header row - look for a row with "email" or multiple non-empty cells
-        let headerRowIndex = 0
-        for (let i = 0; i < Math.min(rawData.length, 10); i++) {
-          const row = rawData[i] as any[]
-          if (!row) continue
+        // Combine all sheets
+        let allRows: Record<string, any>[] = []
+        let headers: string[] = []
+        
+        for (const sheetName of workbook.SheetNames) {
+          const sheet = workbook.Sheets[sheetName]
           
-          // Count non-empty cells
-          const nonEmptyCells = row.filter(cell => 
-            cell !== null && cell !== undefined && String(cell).trim() !== ''
-          ).length
+          // First, get raw data to find the header row
+          const rawData = XLSX.utils.sheet_to_json<any[]>(sheet, {
+            header: 1, // Get as array of arrays
+            defval: '',
+          })
           
-          // Check if this looks like a header row (has email-like column or many columns)
-          const hasEmailColumn = row.some(cell => 
-            String(cell).toLowerCase().includes('email') ||
-            String(cell).toLowerCase().includes('e-mail')
-          )
+          // Skip empty sheets
+          if (rawData.length === 0) continue
           
-          const hasNameColumn = row.some(cell => 
-            String(cell).toLowerCase().includes('name') ||
-            String(cell).toLowerCase().includes('first') ||
-            String(cell).toLowerCase().includes('last')
-          )
-          
-          if ((hasEmailColumn || hasNameColumn) && nonEmptyCells >= 3) {
-            headerRowIndex = i
-            break
+          // Find the header row - look for a row with "email" or multiple non-empty cells
+          let headerRowIndex = 0
+          for (let i = 0; i < Math.min(rawData.length, 10); i++) {
+            const row = rawData[i] as any[]
+            if (!row) continue
+            
+            // Count non-empty cells
+            const nonEmptyCells = row.filter(cell => 
+              cell !== null && cell !== undefined && String(cell).trim() !== ''
+            ).length
+            
+            // Check if this looks like a header row (has email-like column or many columns)
+            const hasEmailColumn = row.some(cell => 
+              String(cell).toLowerCase().includes('email') ||
+              String(cell).toLowerCase().includes('e-mail')
+            )
+            
+            const hasNameColumn = row.some(cell => 
+              String(cell).toLowerCase().includes('name') ||
+              String(cell).toLowerCase().includes('first') ||
+              String(cell).toLowerCase().includes('last')
+            )
+            
+            if ((hasEmailColumn || hasNameColumn) && nonEmptyCells >= 3) {
+              headerRowIndex = i
+              break
+            }
+            
+            // If row has 5+ non-empty cells, it's likely the header
+            if (nonEmptyCells >= 5) {
+              headerRowIndex = i
+              break
+            }
           }
           
-          // If row has 5+ non-empty cells, it's likely the header
-          if (nonEmptyCells >= 5) {
-            headerRowIndex = i
-            break
+          // Now parse with the correct header row
+          const jsonData = XLSX.utils.sheet_to_json<Record<string, any>>(sheet, {
+            defval: '',
+            range: headerRowIndex, // Start from the detected header row
+          })
+          
+          // Get headers from first sheet (or first sheet with data)
+          if (headers.length === 0 && jsonData.length > 0) {
+            headers = Object.keys(jsonData[0]).filter(h => !h.startsWith('__EMPTY'))
+          }
+          
+          // Clean up rows and add to allRows
+          for (const row of jsonData) {
+            const cleaned: Record<string, any> = {}
+            for (const [key, value] of Object.entries(row)) {
+              if (!key.startsWith('__EMPTY')) {
+                cleaned[key] = value
+              }
+            }
+            // Only add if row has some data
+            if (Object.keys(cleaned).length > 0) {
+              allRows.push(cleaned)
+            }
           }
         }
         
-        // Now parse with the correct header row
-        const jsonData = XLSX.utils.sheet_to_json<Record<string, any>>(sheet, {
-          defval: '',
-          range: headerRowIndex, // Start from the detected header row
-        })
-        
-        // Filter out __EMPTY columns from headers
-        let headers = jsonData.length > 0 ? Object.keys(jsonData[0]) : []
-        headers = headers.filter(h => !h.startsWith('__EMPTY'))
-        
-        // Also clean up the rows to remove __EMPTY keys
-        const cleanedRows = jsonData.map(row => {
-          const cleaned: Record<string, any> = {}
-          for (const [key, value] of Object.entries(row)) {
-            if (!key.startsWith('__EMPTY')) {
-              cleaned[key] = value
-            }
-          }
-          return cleaned
-        })
+        console.log(`Parsed ${workbook.SheetNames.length} sheets, total ${allRows.length} rows`)
         
         resolve({
           headers,
-          rows: cleanedRows,
+          rows: allRows,
           fileName,
           fileType,
-          rowCount: cleanedRows.length,
+          rowCount: allRows.length,
         })
       } catch (error: any) {
         reject(new Error(`Excel parsing failed: ${error.message}`))
