@@ -103,9 +103,13 @@ async function parseExcel(
     reader.onload = (e) => {
       try {
         const data = new Uint8Array(e.target?.result as ArrayBuffer)
+        // Don't set sheetRows - let it read everything
         const workbook = XLSX.read(data, { 
           type: 'array',
-          sheetRows: 0, // Read ALL rows (no limit)
+          // Do NOT set sheetRows - default reads all rows
+          cellDates: true,
+          cellNF: false,
+          cellText: false,
         })
         
         // Combine all sheets
@@ -115,11 +119,18 @@ async function parseExcel(
         for (const sheetName of workbook.SheetNames) {
           const sheet = workbook.Sheets[sheetName]
           
+          // Get sheet range to check total rows
+          const range = XLSX.utils.decode_range(sheet['!ref'] || 'A1')
+          console.log(`Sheet "${sheetName}" range: ${sheet['!ref']}, rows: ${range.e.r - range.s.r + 1}`)
+          
           // First, get raw data to find the header row
           const rawData = XLSX.utils.sheet_to_json<any[]>(sheet, {
             header: 1, // Get as array of arrays
             defval: '',
+            raw: true,
           })
+          
+          console.log(`Sheet "${sheetName}" raw data length: ${rawData.length}`)
           
           // Skip empty sheets
           if (rawData.length === 0) continue
@@ -159,11 +170,16 @@ async function parseExcel(
             }
           }
           
+          console.log(`Sheet "${sheetName}" header row index: ${headerRowIndex}`)
+          
           // Now parse with the correct header row
           const jsonData = XLSX.utils.sheet_to_json<Record<string, any>>(sheet, {
             defval: '',
             range: headerRowIndex, // Start from the detected header row
+            raw: true,
           })
+          
+          console.log(`Sheet "${sheetName}" parsed jsonData length: ${jsonData.length}`)
           
           // Get headers from first sheet (or first sheet with data)
           if (headers.length === 0 && jsonData.length > 0) {
@@ -183,9 +199,11 @@ async function parseExcel(
               allRows.push(cleaned)
             }
           }
+          
+          console.log(`After processing sheet "${sheetName}", total allRows: ${allRows.length}`)
         }
         
-        console.log(`Parsed ${workbook.SheetNames.length} sheets, total ${allRows.length} rows`)
+        console.log(`FINAL: Parsed ${workbook.SheetNames.length} sheets, total ${allRows.length} rows`)
         
         resolve({
           headers,
