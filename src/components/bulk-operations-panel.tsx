@@ -288,6 +288,7 @@ interface BatchGenerationModalProps {
   onClose: () => void
   campaignId: string
   contactIds: string[]
+  totalPending?: number  // Total contacts still needing drafts (for showing "X more remaining")
   onComplete: () => void
 }
 
@@ -296,6 +297,7 @@ export function BatchGenerationModal({
   onClose,
   campaignId,
   contactIds,
+  totalPending,
   onComplete,
 }: BatchGenerationModalProps) {
   const [isGenerating, setIsGenerating] = useState(false)
@@ -354,7 +356,14 @@ export function BatchGenerationModal({
             </div>
             <div>
               <h2 className="text-lg font-semibold text-gray-900">Generate AI Emails</h2>
-              <p className="text-sm text-gray-500">{contactIds.length} contacts selected</p>
+              <p className="text-sm text-gray-500">
+                {contactIds.length} contacts in this batch
+                {totalPending && totalPending > contactIds.length && (
+                  <span className="text-amber-600 ml-1">
+                    ({totalPending - contactIds.length} more after this batch)
+                  </span>
+                )}
+              </p>
             </div>
           </div>
           <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg">

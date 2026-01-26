@@ -608,6 +608,10 @@ export default function CampaignDetailPage() {
   const unselectAllContacts = () => setSelectedContacts([])
   const availableContacts = contacts.filter(c => !contactCampaigns.some(cc => cc.contact_id === c.id))
 
+  // Contacts in campaign that don't have emails yet (need draft generation)
+  const contactsNeedingDrafts = contactCampaigns.filter(cc => !cc.emails || cc.emails.length === 0)
+  const contactIdsNeedingDrafts = contactsNeedingDrafts.map(cc => cc.contact_id)
+
   // Apply modal filters to available contacts
   const filteredAvailableContacts = applyFilters(
     availableContacts,
@@ -667,13 +671,16 @@ export default function CampaignDetailPage() {
                 <Save className="h-4 w-4" />
                 <span>Edit Template</span>
               </button>
-              {availableContacts.length > 0 && (
+              {contactIdsNeedingDrafts.length > 0 && (
                 <button
                   onClick={() => setShowBatchGeneration(true)}
                   className="flex items-center space-x-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
                 >
                   <Sparkles className="h-4 w-4" />
-                  <span>Batch Generate</span>
+                  <span>Generate {Math.min(100, contactIdsNeedingDrafts.length)} Drafts</span>
+                  {contactIdsNeedingDrafts.length > 100 && (
+                    <span className="text-purple-200 text-xs">({contactIdsNeedingDrafts.length} pending)</span>
+                  )}
                 </button>
               )}
               <button onClick={() => setShowAddContacts(true)} className="flex items-center space-x-2 px-4 py-2 bg-brand-600 text-white rounded-lg hover:bg-brand-700 transition-colors"><Plus className="h-4 w-4" /><span>Add VCs</span></button>
@@ -1043,10 +1050,16 @@ export default function CampaignDetailPage() {
                           </div>
                         </button>
 
-                        {/* Contacts List */}
+                        {/* Contacts List - Limited to 300 */}
                         {isExpanded && (
-                          <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-3">
-                            {searchedContacts.map((contact) => (
+                          <div className="p-4">
+                            {searchedContacts.length > 300 && (
+                              <div className="mb-3 bg-amber-50 px-3 py-2 rounded-lg text-sm text-amber-700">
+                                Showing first 300 of {searchedContacts.length} contacts. Use search above to find specific contacts.
+                              </div>
+                            )}
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            {searchedContacts.slice(0, 300).map((contact) => (
                               <div
                                 key={contact.id}
                                 onClick={() => toggleContact(contact.id)}
@@ -1066,6 +1079,7 @@ export default function CampaignDetailPage() {
                                 </div>
                               </div>
                             ))}
+                            </div>
                           </div>
                         )}
                       </div>
@@ -1130,8 +1144,14 @@ export default function CampaignDetailPage() {
                           </div>
                         </button>
                         {isManualExpanded && (
-                          <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-3">
-                            {searchedManual.map((contact) => (
+                          <div className="p-4">
+                            {searchedManual.length > 300 && (
+                              <div className="mb-3 bg-amber-50 px-3 py-2 rounded-lg text-sm text-amber-700">
+                                Showing first 300 of {searchedManual.length} contacts. Use search above to find specific contacts.
+                              </div>
+                            )}
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            {searchedManual.slice(0, 300).map((contact) => (
                               <div
                                 key={contact.id}
                                 onClick={() => toggleContact(contact.id)}
@@ -1149,6 +1169,7 @@ export default function CampaignDetailPage() {
                                 </div>
                               </div>
                             ))}
+                            </div>
                           </div>
                         )}
                       </div>
@@ -1209,7 +1230,8 @@ export default function CampaignDetailPage() {
         isOpen={showBatchGeneration}
         onClose={() => setShowBatchGeneration(false)}
         campaignId={campaignId}
-        contactIds={availableContacts.map(c => c.id)}
+        contactIds={contactIdsNeedingDrafts.slice(0, 100)}
+        totalPending={contactIdsNeedingDrafts.length}
         onComplete={refreshBulkStats}
       />
       
