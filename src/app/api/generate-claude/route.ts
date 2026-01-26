@@ -382,15 +382,14 @@ export async function POST(request: NextRequest) {
     }
     
     // Create structured email body
-    // Bolding is now DISABLED by default - templates should include **markdown bold** 
-    // which gets converted to <strong> tags. No additional auto-bolding is applied.
+    // Apply important word bolding for better formatting
     // Options: 
-    // - config.applyBolding = true: Enable keyword auto-bolding (opt-in)
-    // - config.dynamicBolding = true: Use AI for smart bolding (requires applyBolding=true)
-    // - Default: Only convert **markdown** to <strong>, no auto-bolding
+    // - config.applyBolding = false: Disable auto-bolding (only convert **markdown** to <strong>)
+    // - config.dynamicBolding = true: Use AI for smart bolding (slower but smarter)
+    // - Default: Use static keyword bolding (fast) - auto-bold names, companies, etc.
     const additionalNames = isPreview ? [] : extractNamesFromContact(contact)
-    const applyBolding = config.applyBolding === true // Default to false - only use template markdown
-    const useDynamicBolding = config.dynamicBolding === true // Requires applyBolding=true
+    const applyBolding = config.applyBolding !== false // Default to true (original behavior)
+    const useDynamicBolding = config.dynamicBolding === true // Default to false (opt-in)
     
     // Get sender info for context
     const sender = getMemberById(senderId)
@@ -401,12 +400,12 @@ export async function POST(request: NextRequest) {
     }
     
     // Apply bolding based on configuration
-    // Default: Only convert **markdown bold** to <strong> tags from template
-    // If applyBolding=true: Also auto-bold keywords and names
-    let boldedGreeting = convertMarkdownBold(greeting)
-    let boldedContext = convertMarkdownBold(context_p1)
-    let boldedValue = convertMarkdownBold(value_p2)
-    let boldedCta = convertMarkdownBold(cta)
+    // Default: Auto-bold keywords and names (original behavior)
+    // If applyBolding=false: Only convert **markdown bold** to <strong> tags
+    let boldedGreeting = greeting
+    let boldedContext = context_p1
+    let boldedValue = value_p2
+    let boldedCta = cta
     
     if (applyBolding) {
       if (useDynamicBolding && !isPreview) {
@@ -421,11 +420,17 @@ export async function POST(request: NextRequest) {
         boldedValue = v
         boldedCta = ct
       } else {
-        // Static keyword bolding (fast) - only when explicitly enabled
+        // Static keyword bolding (fast) - DEFAULT
         boldedContext = boldImportantWords(context_p1, additionalNames)
         boldedValue = boldImportantWords(value_p2, additionalNames)
         boldedCta = boldImportantWords(cta, additionalNames)
       }
+    } else {
+      // Only convert **markdown** to <strong> when bolding is explicitly disabled
+      boldedGreeting = convertMarkdownBold(greeting)
+      boldedContext = convertMarkdownBold(context_p1)
+      boldedValue = convertMarkdownBold(value_p2)
+      boldedCta = convertMarkdownBold(cta)
     }
     
     const emailBody = {
