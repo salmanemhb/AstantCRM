@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
+import DOMPurify from 'dompurify'
 import {
   X,
   Paperclip,
@@ -263,8 +264,9 @@ export default function EmailEditorModal({
                         className="w-full px-4 py-3 text-left hover:bg-gray-50 border-b border-gray-100 last:border-0"
                       >
                         <p className="font-medium text-gray-900 text-sm">{sig.name}</p>
-                        <p className="text-xs text-gray-500 mt-0.5 truncate"
-                           dangerouslySetInnerHTML={{ __html: sig.content.replace(/<[^>]*>/g, ' ').substring(0, 50) + '...' }} />
+                        <p className="text-xs text-gray-500 mt-0.5 truncate">
+                           {sig.content.replace(/<[^>]*>/g, ' ').substring(0, 50) + '...'}
+                        </p>
                       </button>
                     ))}
                   </div>

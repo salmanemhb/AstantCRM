@@ -2,9 +2,11 @@
 // TEAM SIGNATURES - ASTANT GLOBAL MANAGEMENT
 // ============================================
 
-// Supabase project configuration - SINGLE SOURCE OF TRUTH
-// This should match your Supabase project URL
-export const SUPABASE_PROJECT_ID = 'ezqltihevxrloucssqjf'
+// Supabase project configuration
+// Uses environment variable with fallback for development
+export const SUPABASE_PROJECT_ID = process.env.NEXT_PUBLIC_SUPABASE_URL
+  ? new URL(process.env.NEXT_PUBLIC_SUPABASE_URL).hostname.split('.')[0]
+  : 'ezqltihevxrloucssqjf'
 
 // Logo hosted on Supabase storage for reliable email delivery
 // Run POST /api/upload-logo to upload the logo first

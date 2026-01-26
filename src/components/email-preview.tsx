@@ -2,8 +2,18 @@
 
 import { useState } from 'react'
 import { X, Eye, Monitor, Smartphone, Mail } from 'lucide-react'
+import DOMPurify from 'dompurify'
 import { COMPANY_INFO, getSignatureHtml, getMemberById } from '@/lib/signatures'
 import { getBannerHtml, type EmailBanner } from '@/lib/email-formatting'
+
+// Sanitize HTML content to prevent XSS attacks
+function sanitizeHtml(html: string): string {
+  if (typeof window === 'undefined') return html
+  return DOMPurify.sanitize(html, {
+    ALLOWED_TAGS: ['b', 'i', 'u', 'strong', 'em', 'a', 'br', 'p', 'span', 'div', 'ul', 'ol', 'li'],
+    ALLOWED_ATTR: ['href', 'target', 'rel', 'style', 'class'],
+  })
+}
 
 interface EmailPreviewProps {
   subject: string
@@ -200,26 +210,26 @@ export function EmailPreviewInline({
         {body.context_p1 && (
           <div 
             className="mb-4" 
-            dangerouslySetInnerHTML={{ __html: body.context_p1.replace(/<br\s*\/?>/gi, '\n').replace(/&amp;/g, '&').replace(/\n/g, '<br/>') }} 
+            dangerouslySetInnerHTML={{ __html: sanitizeHtml(body.context_p1.replace(/<br\s*\/?>/gi, '\n').replace(/&amp;/g, '&').replace(/\n/g, '<br/>')) }} 
           />
         )}
         {body.value_p2 && (
           <div 
             className="mb-4" 
-            dangerouslySetInnerHTML={{ __html: body.value_p2.replace(/<br\s*\/?>/gi, '\n').replace(/&amp;/g, '&').replace(/\n/g, '<br/>') }} 
+            dangerouslySetInnerHTML={{ __html: sanitizeHtml(body.value_p2.replace(/<br\s*\/?>/gi, '\n').replace(/&amp;/g, '&').replace(/\n/g, '<br/>')) }} 
           />
         )}
         {body.cta && (
           <div 
             className="mb-4" 
-            dangerouslySetInnerHTML={{ __html: body.cta.replace(/<br\s*\/?>/gi, '\n').replace(/&amp;/g, '&').replace(/\n/g, '<br/>') }} 
+            dangerouslySetInnerHTML={{ __html: sanitizeHtml(body.cta.replace(/<br\s*\/?>/gi, '\n').replace(/&amp;/g, '&').replace(/\n/g, '<br/>')) }} 
           />
         )}
       </div>
       
       <div 
         className="border-t pt-4 mt-4"
-        dangerouslySetInnerHTML={{ __html: signatureHtml }}
+        dangerouslySetInnerHTML={{ __html: sanitizeHtml(signatureHtml) }}
       />
     </div>
   )

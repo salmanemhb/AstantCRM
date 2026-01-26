@@ -55,7 +55,13 @@ export default function BulkOperationsPanel({
     message?: string
   } | null>(null)
 
-  const executeOperation = async (operation: string, options: any = {}) => {
+  interface OperationOptions {
+    filter?: 'green' | 'yellow' | 'red' | 'all'
+    sender_id?: string
+    dry_run?: boolean
+  }
+
+  const executeOperation = async (operation: string, options: OperationOptions = {}) => {
     setLoading(operation)
     setResult(null)
 

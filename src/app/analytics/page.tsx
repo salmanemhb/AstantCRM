@@ -133,7 +133,9 @@ interface ContactDetail {
 
 type TabId = 'overview' | 'pipeline' | 'contacts'
 
-const TABS: { id: TabId; label: string; icon: any }[] = [
+import type { LucideIcon } from 'lucide-react'
+
+const TABS: { id: TabId; label: string; icon: LucideIcon }[] = [
     { id: 'overview', label: 'Overview', icon: BarChart3 },
     { id: 'pipeline', label: 'Pipeline', icon: Users },
     { id: 'contacts', label: 'Contacts', icon: User },
@@ -203,7 +205,15 @@ function StatCard({
     )
 }
 
-function SimpleBarChart({ data }: { data: any[] }) {
+interface ChartDataPoint {
+    date: string
+    sent?: number
+    opened?: number
+    replied?: number
+    [key: string]: string | number | undefined
+}
+
+function SimpleBarChart({ data }: { data: ChartDataPoint[] }) {
     if (!data || data.length === 0) {
         return (
             <div className="h-[200px] flex items-center justify-center text-gray-400">

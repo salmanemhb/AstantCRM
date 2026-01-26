@@ -38,24 +38,50 @@ interface ResendWebhookPayload {
     }
 }
 
-// Verify webhook signature from Resend
-// NOTE: Resend uses Svix which has a complex signature format (timestamp + multiple signatures)
-// For proper verification, install @svix/svix package. For now, we skip verification.
+// Verify webhook signature from Resend using HMAC-SHA256
+// Resend uses Svix format: v1,<signature> where signature is base64-encoded HMAC
 function verifyWebhookSignature(
     payload: string,
-    signature: string,
+    signatureHeader: string,
+    timestampHeader: string,
     secret: string
 ): boolean {
     if (!secret) {
-        console.warn('[WEBHOOK] No RESEND_WEBHOOK_SECRET configured, skipping verification')
+        console.warn('[WEBHOOK] No RESEND_WEBHOOK_SECRET configured - SECURITY RISK in production!')
+        // In development, allow without signature. In production, reject.
+        if (process.env.NODE_ENV === 'production') {
+            console.error('[WEBHOOK] Rejecting webhook - no secret configured in production')
+            return false
+        }
         return true
     }
 
-    // TODO: Install @svix/svix package for proper signature verification
-    // The svix-signature header format is: v1,<signature1> v1,<signature2>
-    // For now, we accept all requests but log verification skipped
-    console.log('[WEBHOOK] Signature verification skipped (requires Svix SDK)')
-    return true
+    try {
+        // Svix signature format: v1,<base64_signature>
+        const signatures = signatureHeader.split(' ')
+        const signedPayload = `${timestampHeader}.${payload}`
+        
+        // The secret from Resend starts with 'whsec_', we need to decode it
+        const secretBytes = Buffer.from(secret.replace('whsec_', ''), 'base64')
+        const expectedSignature = crypto
+            .createHmac('sha256', secretBytes)
+            .update(signedPayload)
+            .digest('base64')
+
+        // Check if any of the provided signatures match
+        for (const sig of signatures) {
+            const [version, signature] = sig.split(',')
+            if (version === 'v1' && signature === expectedSignature) {
+                return true
+            }
+        }
+        
+        console.error('[WEBHOOK] Signature mismatch')
+        return false
+    } catch (err) {
+        console.error('[WEBHOOK] Signature verification error:', err)
+        return false
+    }
 }
 
 export async function POST(request: NextRequest) {
@@ -64,15 +90,14 @@ export async function POST(request: NextRequest) {
     try {
         const rawBody = await request.text()
         const signature = request.headers.get('svix-signature') || ''
+        const timestamp = request.headers.get('svix-timestamp') || ''
         const webhookSecret = process.env.RESEND_WEBHOOK_SECRET || ''
 
-        // Note: Signature verification currently disabled - requires Svix SDK
-        // if (process.env.NODE_ENV === 'production' && webhookSecret) {
-        //     if (!verifyWebhookSignature(rawBody, signature, webhookSecret)) {
-        //         console.error('[RESEND-WEBHOOK] Invalid signature')
-        //         return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
-        //     }
-        // }
+        // Verify signature in production
+        if (!verifyWebhookSignature(rawBody, signature, timestamp, webhookSecret)) {
+            console.error('[RESEND-WEBHOOK] Invalid webhook signature')
+            return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
+        }
 
         const payload: ResendWebhookPayload = JSON.parse(rawBody)
         console.log('[RESEND-WEBHOOK] Event type:', payload.type, 'Email ID:', payload.data.email_id)

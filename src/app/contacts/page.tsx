@@ -103,7 +103,12 @@ export default function ContactsPage() {
 
   // Get list of deleted demo list IDs from localStorage
   const getDeletedDemoListIds = (): string[] => {
-    return JSON.parse(localStorage.getItem('deleted_demo_lists') || '[]')
+    if (typeof window === 'undefined') return []
+    try {
+      return JSON.parse(localStorage.getItem('deleted_demo_lists') || '[]')
+    } catch {
+      return []
+    }
   }
 
   // Filter out deleted demo lists

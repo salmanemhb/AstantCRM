@@ -38,8 +38,9 @@ interface Campaign {
   reference_email?: string | null
 }
 
-// Safe localStorage getter (handles private browsing mode)
+// Safe localStorage getter (handles private browsing mode and SSR)
 function safeGetLocalStorage(key: string): string {
+  if (typeof window === 'undefined') return '[]'
   try {
     return localStorage.getItem(key) || '[]'
   } catch {
@@ -82,6 +83,7 @@ export default function CampaignsPage() {
 
   // Get list of deleted demo campaign IDs from localStorage (with try-catch for private browsing)
   const getDeletedDemoIds = (): string[] => {
+    if (typeof window === 'undefined') return []
     try {
       return JSON.parse(localStorage.getItem('deleted_demo_campaigns') || '[]')
     } catch {
