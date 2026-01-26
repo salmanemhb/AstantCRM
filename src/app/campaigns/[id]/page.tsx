@@ -92,6 +92,11 @@ export default function CampaignDetailPage() {
   const [expandedSheets, setExpandedSheets] = useState<Set<string>>(new Set())
   const [modalSearchQuery, setModalSearchQuery] = useState('')
 
+  // Filter state for main campaign view (batch generation)
+  const [mainActiveFilters, setMainActiveFilters] = useState<ActiveFilter[]>([])
+  const [mainSelectedListIds, setMainSelectedListIds] = useState<string[]>([])
+  const [mainSearchQuery, setMainSearchQuery] = useState('')
+
   // Saved format state - stores the FORMAT/STRUCTURE to apply to other emails
   const [savedFormat, setSavedFormat] = useState<SavedFormat | null>(() => {
     // Load from localStorage on mount (client-side only)
@@ -610,7 +615,26 @@ export default function CampaignDetailPage() {
 
   // Contacts in campaign that don't have emails yet (need draft generation)
   const contactsNeedingDrafts = contactCampaigns.filter(cc => !cc.emails || cc.emails.length === 0)
-  const contactIdsNeedingDrafts = contactsNeedingDrafts.map(cc => cc.contact_id)
+  
+  // Get the actual contact objects for filtering
+  const contactsInCampaignNeedingDrafts = contactsNeedingDrafts
+    .map(cc => cc.contact)
+    .filter((c): c is Contact => c !== undefined)
+
+  // Apply main filters to contacts needing drafts
+  const filteredContactsNeedingDrafts = applyFilters(
+    contactsInCampaignNeedingDrafts,
+    mainActiveFilters,
+    mainSelectedListIds,
+    (c) => c.contact_list_id || null
+  ).filter(c => 
+    !mainSearchQuery || 
+    `${c.first_name} ${c.last_name} ${c.email} ${c.firm || ''} ${c.role || ''}`
+      .toLowerCase()
+      .includes(mainSearchQuery.toLowerCase())
+  )
+
+  const contactIdsNeedingDrafts = filteredContactsNeedingDrafts.map(c => c.id)
 
   // Apply modal filters to available contacts
   const filteredAvailableContacts = applyFilters(
@@ -677,7 +701,10 @@ export default function CampaignDetailPage() {
                   className="flex items-center space-x-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
                 >
                   <Sparkles className="h-4 w-4" />
-                  <span>Generate {Math.min(100, contactIdsNeedingDrafts.length)} Drafts</span>
+                  <span>
+                    Generate {Math.min(100, contactIdsNeedingDrafts.length)} Drafts
+                    {(mainActiveFilters.length > 0 || mainSelectedListIds.length > 0 || mainSearchQuery) && ' (Filtered)'}
+                  </span>
                   {contactIdsNeedingDrafts.length > 100 && (
                     <span className="text-purple-200 text-xs">({contactIdsNeedingDrafts.length} pending)</span>
                   )}
@@ -694,6 +721,54 @@ export default function CampaignDetailPage() {
       {error && <div className="bg-red-50 border-b border-red-100 px-4 py-3"><div className="max-w-6xl mx-auto flex items-center justify-between"><p className="text-sm text-red-700">{error}</p><button onClick={() => setError(null)} className="text-red-500 hover:text-red-700"><X className="h-4 w-4" /></button></div></div>}
 
       <main className="max-w-6xl mx-auto px-4 py-6">
+        {/* Filters for Batch Generation - Only show when there are contacts needing drafts */}
+        {contactsNeedingDrafts.length > 0 && (
+          <div className="mb-6 bg-white rounded-xl border border-gray-200 p-4">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center space-x-2">
+                <Sparkles className="h-5 w-5 text-purple-600" />
+                <h3 className="font-medium text-gray-900">Filter Contacts for Batch Generation</h3>
+                <span className="text-sm text-gray-500">
+                  ({contactIdsNeedingDrafts.length} of {contactsNeedingDrafts.length} contacts match filters)
+                </span>
+              </div>
+              {(mainActiveFilters.length > 0 || mainSelectedListIds.length > 0 || mainSearchQuery) && (
+                <button
+                  onClick={() => {
+                    setMainActiveFilters([])
+                    setMainSelectedListIds([])
+                    setMainSearchQuery('')
+                  }}
+                  className="text-sm text-gray-500 hover:text-gray-700"
+                >
+                  Clear filters
+                </button>
+              )}
+            </div>
+            
+            {/* Search */}
+            <div className="mb-3">
+              <input
+                type="text"
+                placeholder="Search by name, firm, email..."
+                value={mainSearchQuery}
+                onChange={(e) => setMainSearchQuery(e.target.value)}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+              />
+            </div>
+            
+            <ContactFilters
+              contactLists={contactLists}
+              selectedListIds={mainSelectedListIds}
+              onListSelectionChange={setMainSelectedListIds}
+              activeFilters={mainActiveFilters}
+              onFiltersChange={setMainActiveFilters}
+              totalCount={contactsNeedingDrafts.length}
+              filteredCount={mainActiveFilters.length > 0 || mainSelectedListIds.length > 0 || mainSearchQuery ? contactIdsNeedingDrafts.length : undefined}
+            />
+          </div>
+        )}
+
         {/* Bulk Operations Panel - Only show when there are contacts */}
         {bulkStats && contactCampaigns.length > 0 && (
           <div className="mb-6">
