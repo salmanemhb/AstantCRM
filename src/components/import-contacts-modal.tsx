@@ -1,27 +1,26 @@
 'use client'
 
 import { useState, useCallback, useRef } from 'react'
-import {
-  Upload,
-  FileSpreadsheet,
-  X,
-  Check,
+import { 
+  Upload, 
+  FileSpreadsheet, 
+  X, 
+  Check, 
   AlertCircle,
   ChevronDown,
   Loader2,
   ArrowRight,
   ArrowLeft
 } from 'lucide-react'
-import {
-  parseSpreadsheet,
-  autoDetectMapping,
+import { 
+  parseSpreadsheet, 
+  autoDetectMapping, 
   validateMapping,
   extractContact,
-  extractFilterableColumns,
   formatHeader,
   formatCellValue,
   type ParsedSpreadsheet,
-  type ColumnMapping
+  type ColumnMapping 
 } from '@/lib/spreadsheet-parser'
 import { createClient } from '@/lib/supabase/client'
 
@@ -42,23 +41,23 @@ export default function ImportContactsModal({ onClose, onImported }: ImportConta
   const [importProgress, setImportProgress] = useState(0)
   const [importedCount, setImportedCount] = useState(0)
   const [skippedCount, setSkippedCount] = useState(0)
-
+  
   const fileInputRef = useRef<HTMLInputElement>(null)
   const supabase = createClient()
 
   // Handle file selection
   const handleFile = useCallback(async (file: File) => {
     setError(null)
-
+    
     try {
       const data = await parseSpreadsheet(file)
       setParsedData(data)
       setListName(file.name.replace(/\.[^/.]+$/, '')) // Remove extension
-
+      
       // Auto-detect column mappings
       const detectedMapping = autoDetectMapping(data.headers)
       setMapping(detectedMapping)
-
+      
       setStep('mapping')
     } catch (err: any) {
       setError(err.message)
@@ -80,7 +79,7 @@ export default function ImportContactsModal({ onClose, onImported }: ImportConta
     e.preventDefault()
     e.stopPropagation()
     setDragActive(false)
-
+    
     const file = e.dataTransfer.files[0]
     if (file) handleFile(file)
   }, [handleFile])
@@ -112,7 +111,7 @@ export default function ImportContactsModal({ onClose, onImported }: ImportConta
   // Import contacts
   const handleImport = async () => {
     if (!parsedData) return
-
+    
     setStep('importing')
     setImportProgress(0)
     setImportedCount(0)
@@ -120,11 +119,7 @@ export default function ImportContactsModal({ onClose, onImported }: ImportConta
     setError(null)
 
     try {
-      // Extract filterable columns before inserting
-      const filterColumns = extractFilterableColumns(parsedData.rows, parsedData.headers)
-      console.log('[Import] Detected filterable columns:', Object.keys(filterColumns))
-
-      // Create contact list with filter columns
+      // Create contact list
       const { data: contactList, error: listError } = await supabase
         .from('contact_lists')
         .insert({
@@ -134,7 +129,6 @@ export default function ImportContactsModal({ onClose, onImported }: ImportConta
           column_mapping: mapping,
           original_headers: parsedData.headers,
           row_count: parsedData.rowCount,
-          filter_columns: filterColumns,
         })
         .select()
         .single()
@@ -148,11 +142,12 @@ export default function ImportContactsModal({ onClose, onImported }: ImportConta
 
       for (let i = 0; i < parsedData.rows.length; i += batchSize) {
         const batch = parsedData.rows.slice(i, i + batchSize)
-
+        
         const contacts = batch
           .map(row => {
             const contact = extractContact(row, mapping)
-            if (!contact.email) return null
+            // Skip rows with invalid/missing emails (extractContact returns null)
+            if (!contact) return null
             return {
               ...contact,
               contact_list_id: contactList.id,
@@ -163,9 +158,9 @@ export default function ImportContactsModal({ onClose, onImported }: ImportConta
         if (contacts.length > 0) {
           const { error: insertError, data: insertedData } = await supabase
             .from('contacts')
-            .upsert(contacts, {
+            .upsert(contacts, { 
               onConflict: 'email',
-              ignoreDuplicates: true
+              ignoreDuplicates: true 
             })
             .select()
 
@@ -223,10 +218,11 @@ export default function ImportContactsModal({ onClose, onImported }: ImportConta
 
       <div className="p-6">
         <div
-          className={`relative border-2 border-dashed rounded-xl p-12 text-center transition-colors ${dragActive
-              ? 'border-brand-500 bg-brand-50'
+          className={`relative border-2 border-dashed rounded-xl p-12 text-center transition-colors ${
+            dragActive 
+              ? 'border-brand-500 bg-brand-50' 
               : 'border-gray-300 hover:border-gray-400'
-            }`}
+          }`}
           onDragEnter={handleDrag}
           onDragLeave={handleDrag}
           onDragOver={handleDrag}
@@ -239,11 +235,11 @@ export default function ImportContactsModal({ onClose, onImported }: ImportConta
             onChange={handleFileInput}
             className="hidden"
           />
-
+          
           <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
             <FileSpreadsheet className="h-8 w-8 text-gray-400" />
           </div>
-
+          
           <p className="text-gray-900 font-medium mb-2">
             Drag and drop your file here
           </p>
@@ -335,8 +331,9 @@ export default function ImportContactsModal({ onClose, onImported }: ImportConta
                   <select
                     value={mapping[key] || ''}
                     onChange={(e) => updateMapping(key, e.target.value || undefined)}
-                    className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${mapping[key] ? 'border-green-300 bg-green-50' : 'border-gray-300'
-                      }`}
+                    className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${
+                      mapping[key] ? 'border-green-300 bg-green-50' : 'border-gray-300'
+                    }`}
                   >
                     <option value="">-- Select column --</option>
                     {parsedData.headers.map((header) => (
@@ -388,8 +385,10 @@ export default function ImportContactsModal({ onClose, onImported }: ImportConta
   const renderPreviewStep = () => {
     if (!parsedData) return null
 
-    // Show first 5 rows as preview
-    const previewRows = parsedData.rows.slice(0, 5).map(row => extractContact(row, mapping))
+    // Show first 5 rows as preview (filter out any with invalid emails)
+    const previewRows = parsedData.rows.slice(0, 5)
+      .map(row => extractContact(row, mapping))
+      .filter((contact): contact is NonNullable<typeof contact> => contact !== null)
 
     return (
       <>
@@ -475,10 +474,10 @@ export default function ImportContactsModal({ onClose, onImported }: ImportConta
         <Loader2 className="h-12 w-12 text-brand-600 animate-spin mb-6" />
         <p className="text-gray-900 font-medium mb-2">Importing contacts...</p>
         <p className="text-gray-500 text-sm mb-6">This may take a moment</p>
-
+        
         <div className="w-full max-w-xs">
           <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
-            <div
+            <div 
               className="h-full bg-brand-600 transition-all duration-300"
               style={{ width: `${importProgress}%` }}
             />
