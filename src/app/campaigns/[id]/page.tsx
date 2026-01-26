@@ -100,6 +100,10 @@ export default function CampaignDetailPage() {
   // Batch add mode - add contacts without generating drafts immediately
   const [batchAddMode, setBatchAddMode] = useState(false)
   const [isAddingContacts, setIsAddingContacts] = useState(false)
+  
+  // Select X contacts feature
+  const [selectCount, setSelectCount] = useState<string>('')
+  const [isRegeneratingFilters, setIsRegeneratingFilters] = useState(false)
 
   // Saved format state - stores the FORMAT/STRUCTURE to apply to other emails
   const [savedFormat, setSavedFormat] = useState<SavedFormat | null>(() => {
@@ -702,6 +706,41 @@ export default function CampaignDetailPage() {
   const selectAllContacts = () => setSelectedContacts(filteredAvailableContacts.map(c => c.id))
   const unselectAllContacts = () => setSelectedContacts([])
   const availableContacts = contacts.filter(c => !contactCampaigns.some(cc => cc.contact_id === c.id))
+  
+  // Select first X contacts from filtered list
+  const selectXContacts = (count: number) => {
+    const toSelect = filteredAvailableContacts.slice(0, count).map(c => c.id)
+    setSelectedContacts(toSelect)
+  }
+  
+  // Regenerate filter columns for a contact list
+  const regenerateFilters = async (listId: string) => {
+    setIsRegeneratingFilters(true)
+    try {
+      const response = await fetch('/api/regenerate-filters', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ list_id: listId }),
+      })
+      const result = await response.json()
+      if (result.success) {
+        // Refresh contact lists
+        const { data: listsData } = await supabase
+          .from('contact_lists')
+          .select('id, name, filter_columns')
+          .order('created_at', { ascending: false })
+        setContactLists(listsData || [])
+        setSuccessMessage(`Filters regenerated! Found ${Object.keys(result.filter_columns).length} filterable columns.`)
+        setTimeout(() => setSuccessMessage(null), 4000)
+      } else {
+        setError(result.error || 'Failed to regenerate filters')
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to regenerate filters')
+    } finally {
+      setIsRegeneratingFilters(false)
+    }
+  }
 
   // Contacts in campaign that don't have emails yet (need draft generation)
   const contactsNeedingDrafts = contactCampaigns.filter(cc => !cc.emails || cc.emails.length === 0)
@@ -1114,6 +1153,18 @@ export default function CampaignDetailPage() {
                     totalCount={availableContacts.length}
                     filteredCount={modalActiveFilters.length > 0 || modalSelectedListIds.length > 0 ? filteredAvailableContacts.length : undefined}
                   />
+                  {/* Regenerate Filters button - show when a specific list is selected */}
+                  {modalSelectedListIds.length === 1 && (
+                    <div className="mt-2 flex items-center gap-2">
+                      <button
+                        onClick={() => regenerateFilters(modalSelectedListIds[0])}
+                        disabled={isRegeneratingFilters}
+                        className="text-xs text-purple-600 hover:text-purple-700 underline disabled:opacity-50"
+                      >
+                        {isRegeneratingFilters ? 'Regenerating filters...' : 'No filters showing? Click to regenerate'}
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -1127,12 +1178,42 @@ export default function CampaignDetailPage() {
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {/* Quick Stats */}
+                  {/* Quick Stats & Select X */}
                   <div className="flex items-center justify-between mb-4 pb-3 border-b border-gray-100">
                     <span className="text-sm text-gray-600">
                       <span className="font-semibold text-gray-900">{contactLists.length + (filteredAvailableContacts.some(c => !c.contact_list_id) ? 1 : 0)}</span> sources · <span className="font-semibold text-gray-900">{filteredAvailableContacts.length}</span> contacts
                     </span>
                     <div className="flex items-center gap-3">
+                      {/* Select X contacts input */}
+                      <div className="flex items-center gap-1">
+                        <span className="text-xs text-gray-500">Select</span>
+                        <input
+                          type="number"
+                          min="1"
+                          max={filteredAvailableContacts.length}
+                          value={selectCount}
+                          onChange={(e) => setSelectCount(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              const count = parseInt(selectCount)
+                              if (count > 0) selectXContacts(count)
+                            }
+                          }}
+                          placeholder="X"
+                          className="w-16 px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500"
+                        />
+                        <button
+                          onClick={() => {
+                            const count = parseInt(selectCount)
+                            if (count > 0) selectXContacts(count)
+                          }}
+                          disabled={!selectCount || parseInt(selectCount) < 1}
+                          className="px-2 py-1 text-xs bg-brand-600 text-white rounded hover:bg-brand-700 disabled:opacity-50"
+                        >
+                          Go
+                        </button>
+                      </div>
+                      <span className="text-gray-300">|</span>
                       <button
                         onClick={() => {
                           const allIds = new Set(contactLists.map(l => l.id))
