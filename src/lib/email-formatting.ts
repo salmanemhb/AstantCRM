@@ -291,21 +291,30 @@ export const DEFAULT_BANNER: EmailBanner = {
 
 // Generate professional email header with banner
 // Optimized for ALL email clients including Outlook (which uses Word's rendering engine)
+// 
+// DIMENSIONS:
+// - Desktop Gmail/Outlook: 600px container, 560px banner image
+// - Mobile: Scales to 100% width with max-width constraint
+// - Aspect Ratio: 5:1 recommended (e.g., 600x120)
+// - Image should be 1200px wide for retina displays, scaled to 600px
 export function getBannerHtml(banner: EmailBanner): string {
   if (!banner.enabled || !banner.imageUrl) return ''
   
-  // Outlook requirements:
-  // - Explicit width AND height on images (no "auto")
-  // - Use width attribute, not max-width CSS
-  // - MSO conditional comments for Outlook-specific fixes
-  // - No role="presentation" (can cause issues)
+  // Optimal dimensions for email banners:
+  // - Container: 600px (email standard)
+  // - Image display: 600px wide, ~120px height (5:1 ratio)
+  // - Actual image file: 1200x240 for retina (@2x)
+  const containerWidth = 600
+  const imageWidth = 600  // Full width of container for better mobile scaling
+  const imageHeight = 120 // 5:1 aspect ratio
+  
   return `
 <!-- Email Header Banner -->
 <!--[if mso]>
-<table cellpadding="0" cellspacing="0" border="0" width="600" align="center">
+<table cellpadding="0" cellspacing="0" border="0" width="${containerWidth}" align="center">
 <tr><td>
 <![endif]-->
-<table cellpadding="0" cellspacing="0" border="0" width="600" align="center" style="width: 600px; margin: 0 auto;">
+<table cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width: ${containerWidth}px; margin: 0 auto;">
   <tr>
     <td align="center" style="padding: 0;">
       <!-- Top accent bar -->
@@ -315,16 +324,16 @@ export function getBannerHtml(banner: EmailBanner): string {
         </tr>
       </table>
       
-      <!-- Banner image container -->
-      ${banner.linkUrl ? `<a href="${banner.linkUrl}" target="_blank" style="text-decoration: none;">` : ''}
+      <!-- Banner image container with dark background -->
+      ${banner.linkUrl ? `<a href="${banner.linkUrl}" target="_blank" style="text-decoration: none; display: block;">` : ''}
       <table cellpadding="0" cellspacing="0" border="0" width="100%" bgcolor="#1a202c" style="background-color: #1a202c;">
         <tr>
-          <td align="center" style="padding: 16px 20px;">
+          <td align="center" style="padding: 12px 16px;">
             <!--[if mso]>
-            <img src="${banner.imageUrl}" alt="${banner.altText}" width="560" height="140" style="display: block; border: 0;" />
+            <img src="${banner.imageUrl}" alt="${banner.altText}" width="${imageWidth}" height="${imageHeight}" style="display: block; border: 0; width: ${imageWidth}px; height: ${imageHeight}px;" />
             <![endif]-->
             <!--[if !mso]><!-->
-            <img src="${banner.imageUrl}" alt="${banner.altText}" width="560" style="display: block; width: 560px; max-width: 100%; height: auto; border: 0; outline: none;" />
+            <img src="${banner.imageUrl}" alt="${banner.altText}" width="${imageWidth}" style="display: block; width: 100%; max-width: ${imageWidth}px; height: auto; border: 0; outline: none;" />
             <!--<![endif]-->
           </td>
         </tr>
@@ -344,23 +353,29 @@ export function getBannerHtml(banner: EmailBanner): string {
 </td></tr>
 </table>
 <![endif]-->
-<table cellpadding="0" cellspacing="0" border="0" width="600" align="center"><tr><td height="20" style="height: 20px; font-size: 1px; line-height: 1px;">&nbsp;</td></tr></table>
+<!-- Spacer after banner -->
+<table cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width: ${containerWidth}px; margin: 0 auto;"><tr><td height="16" style="height: 16px; font-size: 1px; line-height: 1px;">&nbsp;</td></tr></table>
 <!-- End Email Header Banner -->
 `
 }
 
 // Alternative: Simple centered banner without accent
+// Uses same responsive scaling for mobile compatibility
 export function getSimpleBannerHtml(banner: EmailBanner): string {
   if (!banner.enabled || !banner.imageUrl) return ''
   
-  const imgTag = `<img src="${banner.imageUrl}" alt="${banner.altText}" width="500" style="display: block; width: 100%; max-width: 500px; height: auto; margin: 0 auto; border: 0;" />`
+  // Same dimensions for consistency
+  const containerWidth = 600
+  const imageWidth = 600
+  
+  const imgTag = `<img src="${banner.imageUrl}" alt="${banner.altText}" width="${imageWidth}" style="display: block; width: 100%; max-width: ${imageWidth}px; height: auto; margin: 0 auto; border: 0;" />`
   
   if (banner.linkUrl) {
     return `
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width: 600px; margin: 0 auto;">
+<table cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width: ${containerWidth}px; margin: 0 auto;">
   <tr>
-    <td style="padding: 20px 20px 30px 20px; text-align: center;">
-      <a href="${banner.linkUrl}" target="_blank" style="display: inline-block;">
+    <td style="padding: 16px; text-align: center;">
+      <a href="${banner.linkUrl}" target="_blank" style="display: inline-block; text-decoration: none;">
         ${imgTag}
       </a>
     </td>
@@ -369,9 +384,9 @@ export function getSimpleBannerHtml(banner: EmailBanner): string {
   }
   
   return `
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width: 600px; margin: 0 auto;">
+<table cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width: ${containerWidth}px; margin: 0 auto;">
   <tr>
-    <td style="padding: 20px 20px 30px 20px; text-align: center;">
+    <td style="padding: 16px; text-align: center;">
       ${imgTag}
     </td>
   </tr>
