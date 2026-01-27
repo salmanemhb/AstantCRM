@@ -648,8 +648,15 @@ export default function GmailEmailComposer({
     if (!body) return ''
     
     // Helper to convert text with line breaks to proper HTML paragraphs
+    // Handles content that may already contain HTML tags like <strong>
     const textToHtml = (text: string) => {
       if (!text) return ''
+      
+      // If the text already starts with <p>, it's already formatted as HTML
+      if (text.trim().startsWith('<p>') || text.trim().startsWith('<p ')) {
+        return text
+      }
+      
       // Split by double newlines for paragraphs, preserve single newlines as <br>
       return text
         .split(/\n\n+/)
