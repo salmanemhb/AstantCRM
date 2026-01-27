@@ -766,15 +766,63 @@ export default function GmailEmailComposer({
       tempDiv.innerHTML = htmlContent
       const paragraphs = Array.from(tempDiv.querySelectorAll('p')).map(p => p.innerHTML || '')
       
-      // Build the body structure - HTML content will be preserved
-      const updatedBody: EmailJsonBody = {
-        greeting: paragraphs[0] || '',
-        context_p1: paragraphs[1] || '',
-        value_p2: paragraphs[2] || '',
-        cta: paragraphs.slice(3).join('\n\n') || '',
-        signature: getSignatureText(signatureMemberId),
-        signatureMemberId: signatureMemberId,
-        bannerEnabled: bannerEnabled
+      // Get original body to preserve structure when user adds/removes paragraphs
+      const originalBody = email.current_body || email.original_body || {}
+      
+      // Smart paragraph mapping: preserve original fields if paragraph count changed significantly
+      // This prevents content loss when user structure differs from expected 4-paragraph format
+      let updatedBody: EmailJsonBody
+      
+      if (paragraphs.length >= 4) {
+        // Standard 4+ paragraph structure
+        updatedBody = {
+          greeting: paragraphs[0] || '',
+          context_p1: paragraphs[1] || '',
+          value_p2: paragraphs[2] || '',
+          cta: paragraphs.slice(3).join('\n\n') || '',
+          signature: getSignatureText(signatureMemberId),
+          signatureMemberId: signatureMemberId,
+          bannerEnabled: bannerEnabled
+        }
+      } else if (paragraphs.length === 3) {
+        // 3 paragraphs: greeting, combined body, cta
+        updatedBody = {
+          greeting: paragraphs[0] || '',
+          context_p1: paragraphs[1] || '',
+          value_p2: '', // Empty, content merged into context_p1
+          cta: paragraphs[2] || '',
+          signature: getSignatureText(signatureMemberId),
+          signatureMemberId: signatureMemberId,
+          bannerEnabled: bannerEnabled
+        }
+      } else if (paragraphs.length === 2) {
+        // 2 paragraphs: greeting and cta only
+        updatedBody = {
+          greeting: paragraphs[0] || '',
+          context_p1: originalBody.context_p1 || '', // Preserve original
+          value_p2: originalBody.value_p2 || '', // Preserve original
+          cta: paragraphs[1] || '',
+          signature: getSignatureText(signatureMemberId),
+          signatureMemberId: signatureMemberId,
+          bannerEnabled: bannerEnabled
+        }
+      } else {
+        // 1 or 0 paragraphs - preserve original body, just update what we have
+        updatedBody = {
+          greeting: paragraphs[0] || originalBody.greeting || '',
+          context_p1: originalBody.context_p1 || '',
+          value_p2: originalBody.value_p2 || '',
+          cta: originalBody.cta || '',
+          signature: getSignatureText(signatureMemberId),
+          signatureMemberId: signatureMemberId,
+          bannerEnabled: bannerEnabled
+        }
+      }
+      
+      // Validation: warn if email is essentially empty
+      const hasContent = updatedBody.greeting || updatedBody.context_p1 || updatedBody.value_p2 || updatedBody.cta
+      if (!hasContent) {
+        console.warn('[handleSave] Warning: Saving email with no content')
       }
       
       await onSave({

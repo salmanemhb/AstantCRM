@@ -613,14 +613,19 @@ async function handleBulkSend(request: BulkSendRequest) {
       }
 
       const emailBody = email.current_body || email.original_body
-      const textBody = buildTextEmail(emailBody, effectiveSenderId)
+      
+      // Use per-email sender from emailBody, or fall back to request sender_id, then campaign sender
+      const emailSenderId = emailBody?.signatureMemberId || effectiveSenderId
+      const emailSenderInfo = getSenderFromId(emailSenderId)
+      
+      const textBody = buildTextEmail(emailBody, emailSenderId)
       
       // Create banner config from email body settings  
       const emailBanner: EmailBanner | undefined = emailBody?.bannerEnabled 
         ? { ...DEFAULT_BANNER, enabled: true }
         : undefined
       
-      const htmlBody = buildHtmlEmail(emailBody, contact, effectiveSenderId, emailBanner)
+      const htmlBody = buildHtmlEmail(emailBody, contact, emailSenderId, emailBanner)
 
       // Fetch attachments if any (same as single send)
       const { data: attachments } = await supabase
@@ -632,14 +637,14 @@ async function handleBulkSend(request: BulkSendRequest) {
         let messageId: string
 
         if (resend) {
-          // Build send payload
+          // Build send payload using per-email sender
           const resendPayload: any = {
-            from: `${senderInfo.name} <${senderInfo.email}>`,
+            from: `${emailSenderInfo.name} <${emailSenderInfo.email}>`,
             to: [toEmail],
             subject: email.subject,
             text: textBody,
             html: htmlBody,
-            replyTo: senderInfo.replyTo || senderInfo.email,
+            replyTo: emailSenderInfo.replyTo || emailSenderInfo.email,
             tags: [
               { name: 'campaign', value: campaign_id },
               { name: 'contact', value: contact.id }

@@ -198,9 +198,13 @@ export default function CampaignDetailPage() {
           .single()
 
         if (campaignError || !campaignData) {
-          const stored = JSON.parse(localStorage.getItem('local_campaigns') || '[]')
-          const localCampaign = stored.find((c: any) => c.id === campaignId)
-          setCampaign(localCampaign || null)
+          try {
+            const stored = JSON.parse(localStorage.getItem('local_campaigns') || '[]')
+            const localCampaign = stored.find((c: any) => c.id === campaignId)
+            setCampaign(localCampaign || null)
+          } catch {
+            setCampaign(null)
+          }
         } else {
           setCampaign(campaignData as LocalCampaign)
         }
@@ -291,8 +295,12 @@ export default function CampaignDetailPage() {
       }
 
       // Always clean up localStorage (including saved format)
-      const stored = JSON.parse(localStorage.getItem('local_campaigns') || '[]')
-      localStorage.setItem('local_campaigns', JSON.stringify(stored.filter((c: any) => c.id !== campaignId)))
+      try {
+        const stored = JSON.parse(localStorage.getItem('local_campaigns') || '[]')
+        localStorage.setItem('local_campaigns', JSON.stringify(stored.filter((c: any) => c.id !== campaignId)))
+      } catch {
+        localStorage.removeItem('local_campaigns')
+      }
       localStorage.removeItem(`campaign-format-${campaignId}`)
       router.push('/campaigns')
     } catch (err) {

@@ -88,6 +88,12 @@ function isPossibleName(word: string, isStartOfSentence: boolean): boolean {
   const firstChar = word.charAt(0)
   const rest = word.slice(1)
   
+  // Allow all-caps acronyms (2-4 characters) like IE, MIT, VC
+  const isAcronym = word.length >= 2 && word.length <= 4 && /^[A-Z]+$/.test(word)
+  if (isAcronym && !isStartOfSentence) {
+    return true
+  }
+  
   return (
     firstChar === firstChar.toUpperCase() &&
     firstChar !== firstChar.toLowerCase() &&
@@ -98,10 +104,18 @@ function isPossibleName(word: string, isStartOfSentence: boolean): boolean {
 
 // Bold important words in text
 export function boldImportantWords(text: string, additionalNames: string[] = []): string {
-  if (!text) return text
+  if (!text) return ''
   
   // First, convert any **markdown bold** to <strong> tags
   let result = convertMarkdownBold(text)
+  
+  // If text already has <strong> tags throughout, skip auto-bolding to prevent nesting
+  const AUTO_BOLD_THRESHOLD = 3
+  const strongCount = (result.match(/<strong>/gi) || []).length
+  if (strongCount > AUTO_BOLD_THRESHOLD) {
+    // Already has significant bolding, don't add more
+    return result
+  }
   
   // Create a combined list of terms to bold
   const termsToMatch = [...IMPORTANT_KEYWORDS, ...additionalNames]
@@ -110,14 +124,42 @@ export function boldImportantWords(text: string, additionalNames: string[] = [])
   termsToMatch.sort((a, b) => b.length - a.length)
   
   // Bold specific terms (case-insensitive but preserve original case)
+  // Skip if already wrapped in <strong> tags
   for (const term of termsToMatch) {
-    const regex = new RegExp(`\\b(${escapeRegex(term)})\\b`, 'gi')
-    result = result.replace(regex, '<strong>$1</strong>')
+    try {
+      // Use negative lookbehind/lookahead to avoid double-wrapping (modern browsers)
+      const regex = new RegExp(`(?<!<strong[^>]*>)\\b(${escapeRegex(term)})\\b(?![^<]*</strong>)`, 'gi')
+      result = result.replace(regex, '<strong>$1</strong>')
+    } catch {
+      // Fallback for older browsers (Safari <16.4) that don't support lookbehind
+      const simpleRegex = new RegExp(`\\b(${escapeRegex(term)})\\b`, 'gi')
+      result = result.replace(simpleRegex, (match, p1, offset) => {
+        // Check if already inside a <strong> tag by looking backwards
+        const before = result.substring(Math.max(0, offset - 50), offset)
+        if (before.includes('<strong>') && !before.includes('</strong>')) {
+          return match // Already inside strong tag
+        }
+        return `<strong>${p1}</strong>`
+      })
+    }
   }
   
   // Bold proper names (words starting with capital not at sentence start)
   // This is done sentence by sentence
-  const sentences = result.split(/(?<=[.!?])\s+/)
+  // Use a compatible sentence split (avoid lookbehind for Safari <16.4)
+  let sentences: string[]
+  try {
+    sentences = result.split(/(?<=[.!?])\s+/)
+  } catch {
+    // Fallback: split on sentence-ending punctuation followed by space
+    sentences = result.split(/([.!?])\s+/).reduce((acc: string[], part, i, arr) => {
+      if (i % 2 === 0) {
+        // Content part - combine with next punctuation if exists
+        acc.push(part + (arr[i + 1] || ''))
+      }
+      return acc
+    }, [])
+  }
   result = sentences.map(sentence => {
     const words = sentence.split(/(\s+)/)
     let isFirst = true
@@ -193,8 +235,9 @@ export async function dynamicBoldWithAI(
       const result = await response.json()
       return result.text || text
     }
-  } catch {
+  } catch (err) {
     // Fall back to static bolding
+    console.warn('[dynamicBoldWithAI] API call failed, falling back to static bolding:', err)
   }
   
   return boldImportantWords(text, [
@@ -328,12 +371,12 @@ export function getBannerHtml(banner: EmailBanner): string {
       ${banner.linkUrl ? `<a href="${banner.linkUrl}" target="_blank" style="text-decoration: none; display: block;">` : ''}
       <table cellpadding="0" cellspacing="0" border="0" width="100%" bgcolor="#1a202c" style="background-color: #1a202c;">
         <tr>
-          <td align="center" style="padding: 12px 16px;">
+          <td align="center" style="padding: 8px 0;">
             <!--[if mso]>
             <img src="${banner.imageUrl}" alt="${banner.altText}" width="${imageWidth}" height="${imageHeight}" style="display: block; border: 0; width: ${imageWidth}px; height: ${imageHeight}px;" />
             <![endif]-->
             <!--[if !mso]><!-->
-            <img src="${banner.imageUrl}" alt="${banner.altText}" width="${imageWidth}" style="display: block; width: 100%; max-width: ${imageWidth}px; height: auto; border: 0; outline: none;" />
+            <img src="${banner.imageUrl}" alt="${banner.altText}" style="display: block; width: 100%; max-width: ${imageWidth}px; height: auto; border: 0; outline: none;" />
             <!--<![endif]-->
           </td>
         </tr>

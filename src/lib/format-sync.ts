@@ -169,8 +169,10 @@ export function applyStructuralChanges(
  * Extract the pattern of line breaks from text
  */
 function extractLineBreakPattern(text: string): { single: number; double: number; positions: number[] } {
-  const singleBreaks = (text.match(/(?<!\n)\n(?!\n)/g) || []).length
-  const doubleBreaks = (text.match(/\n\n+/g) || []).length
+  // Count single and double breaks without lookbehind for browser compatibility
+  const allBreaks = text.match(/\n+/g) || []
+  const singleBreaks = allBreaks.filter(b => b.length === 1).length
+  const doubleBreaks = allBreaks.filter(b => b.length >= 2).length
   // Use Array.from for compatibility
   const matches = text.match(/\n+/g) || []
   const positions: number[] = []

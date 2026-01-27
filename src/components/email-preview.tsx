@@ -8,10 +8,24 @@ import { getBannerHtml, type EmailBanner } from '@/lib/email-formatting'
 
 // Sanitize HTML content to prevent XSS attacks
 function sanitizeHtml(html: string): string {
-  if (typeof window === 'undefined') return html
+  if (typeof window === 'undefined') {
+    // Server-side: strip all dangerous tags using basic regex
+    // This is a fallback - real sanitization happens client-side with DOMPurify
+    return html
+      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+      .replace(/<iframe[^>]*>[\s\S]*?<\/iframe>/gi, '')
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+      .replace(/<link[^>]*\/?>/gi, '')
+      .replace(/<object[^>]*>[\s\S]*?<\/object>/gi, '')
+      .replace(/<embed[^>]*\/?>/gi, '')
+      .replace(/on\w+\s*=\s*["'][^"']*["']/gi, '')
+      .replace(/on\w+\s*=\s*[^\s>]+/gi, '')
+      .replace(/javascript:/gi, '')
+      .replace(/data:/gi, '')
+  }
   return DOMPurify.sanitize(html, {
-    ALLOWED_TAGS: ['b', 'i', 'u', 'strong', 'em', 'a', 'br', 'p', 'span', 'div', 'ul', 'ol', 'li'],
-    ALLOWED_ATTR: ['href', 'target', 'rel', 'style', 'class'],
+    ALLOWED_TAGS: ['b', 'i', 'u', 'strong', 'em', 'a', 'br', 'p', 'span', 'div', 'ul', 'ol', 'li', 'img', 'table', 'tr', 'td', 'tbody', 'thead'],
+    ALLOWED_ATTR: ['href', 'target', 'rel', 'style', 'class', 'src', 'alt', 'width', 'height', 'cellpadding', 'cellspacing', 'border', 'align', 'valign', 'bgcolor'],
   })
 }
 
@@ -45,12 +59,22 @@ export function EmailPreviewModal({
   const signatureHtml = getSignatureHtml(senderId, true)
   const bannerHtml = banner ? getBannerHtml(banner) : ''
   
+  // Decode all HTML entities
+  const decodeHtmlEntities = (text: string) => {
+    return text
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#039;/g, "'")
+      .replace(/&nbsp;/g, ' ')
+  }
+  
   const formatParagraph = (text: string) => {
     if (!text) return ''
     // First normalize all line break formats to \n, then convert to <br>
-    return text
+    return decodeHtmlEntities(text)
       .replace(/<br\s*\/?>/gi, '\n')  // Convert <br>, <br/>, <br /> to \n first
-      .replace(/&amp;/g, '&')          // Fix escaped ampersands
       .split(/\n\n+/)
       .filter(p => p.trim())
       .map(p => `<p style="margin: 0 0 16px 0; line-height: 1.6; text-align: justify;">${p.replace(/\n/g, '<br>')}</p>`)
@@ -206,7 +230,12 @@ export function EmailPreviewInline({
       )}
       
       <div className="space-y-4 text-gray-700" style={{ fontFamily: 'Arial, sans-serif' }}>
-        {body.greeting && <p className="mb-4">{body.greeting}</p>}
+        {body.greeting && (
+          <div 
+            className="mb-4" 
+            dangerouslySetInnerHTML={{ __html: sanitizeHtml(body.greeting) }} 
+          />
+        )}
         {body.context_p1 && (
           <div 
             className="mb-4" 
