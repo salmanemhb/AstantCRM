@@ -1047,16 +1047,16 @@ export default function GmailEmailComposer({
             </div>
           )}
           
-          {/* Save Format as Template Button */}
+          {/* Copy Format Button - saves this email's format for Apply to All */}
           {onSaveFormat && (
             <div className="mx-4 mt-3">
               <button
                 onClick={handleSaveFormatAsTemplate}
                 className="flex items-center space-x-1.5 px-3 py-1.5 text-xs text-gray-600 hover:text-brand-600 hover:bg-brand-50 rounded-lg border border-gray-200 hover:border-brand-200 transition-colors"
-                title="Save this email's format (banner, signature) as a template to apply to all emails"
+                title="Copy this email's format (banner, signature) to apply to all other emails"
               >
                 <Copy className="h-3.5 w-3.5" />
-                <span>Save Format as Template</span>
+                <span>Copy Format</span>
               </button>
             </div>
           )}
@@ -1340,15 +1340,15 @@ export default function GmailEmailComposer({
                   </button>
                 )}
                 
-                {/* Edit - shown when approved (to unlock and edit) */}
+                {/* Unapprove - shown when approved (to unlock and edit) */}
                 {isApproved && !isSent && (
                   <button
                     onClick={onUnapprove}
                     className="flex items-center space-x-1.5 px-3 py-2 text-sm text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
-                    title="Unlock to edit (will un-approve)"
+                    title="Unapprove to make edits"
                   >
                     <Edit className="h-4 w-4" />
-                    <span className="hidden sm:inline">Edit</span>
+                    <span className="hidden sm:inline">Unapprove</span>
                   </button>
                 )}
 

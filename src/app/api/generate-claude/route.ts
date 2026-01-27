@@ -451,15 +451,33 @@ export async function POST(request: NextRequest) {
       
       console.log('[GENERATE-CLAUDE] Looking for contact_campaign:', { contact_id, campaign_id })
       
-      // Use .limit(1) instead of .single() to handle potential duplicates
-      const { data: ccRows, error: ccLookupError } = await supabase
-        .from('contact_campaigns')
-        .select('id')
-        .eq('contact_id', contact_id)
-        .eq('campaign_id', campaign_id)
-        .limit(1)
+      // Retry logic to handle race condition when contact_campaign was just created
+      let existingCC: { id: string } | null = null
+      let ccLookupError: any = null
+      const maxRetries = 3
+      const retryDelay = 500 // ms
       
-      const existingCC = ccRows?.[0] || null
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        const { data: ccRows, error } = await supabase
+          .from('contact_campaigns')
+          .select('id')
+          .eq('contact_id', contact_id)
+          .eq('campaign_id', campaign_id)
+          .limit(1)
+        
+        ccLookupError = error
+        existingCC = ccRows?.[0] || null
+        
+        if (existingCC) {
+          console.log(`[GENERATE-CLAUDE] contact_campaign found on attempt ${attempt}:`, existingCC.id)
+          break
+        }
+        
+        if (attempt < maxRetries) {
+          console.log(`[GENERATE-CLAUDE] contact_campaign not found, retrying in ${retryDelay}ms (attempt ${attempt}/${maxRetries})`)
+          await new Promise(resolve => setTimeout(resolve, retryDelay))
+        }
+      }
       
       console.log('[GENERATE-CLAUDE] contact_campaign lookup result:', { existingCC, ccLookupError })
 

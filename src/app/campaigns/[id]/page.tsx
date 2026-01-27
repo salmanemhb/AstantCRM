@@ -422,6 +422,9 @@ export default function CampaignDetailPage() {
         }
         console.log('[handleAddContacts] CC created:', newCC.id)
 
+        // Small delay to ensure Supabase has committed the record
+        await new Promise(resolve => setTimeout(resolve, 100))
+
         console.log('[handleAddContacts] Generating draft...')
         await generateDraft({
           contact_id: contactId,
@@ -820,6 +823,7 @@ export default function CampaignDetailPage() {
               <button 
                 onClick={openEditTemplate}
                 className="flex items-center space-x-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                title="Edit the campaign template - only affects new drafts, not existing ones"
               >
                 <Save className="h-4 w-4" />
                 <span>Edit Template</span>
@@ -978,16 +982,17 @@ export default function CampaignDetailPage() {
                     }}
                     disabled={isApplyingFormat}
                     className="flex items-center space-x-2 px-3 py-1.5 bg-brand-600 text-white rounded-lg text-sm font-medium hover:bg-brand-700 transition-colors disabled:opacity-50"
+                    title="Apply the copied format (banner, signature) to all other emails"
                   >
                     {isApplyingFormat ? (
                       <>
                         <Loader2 className="h-4 w-4 animate-spin" />
-                        <span>Syncing...</span>
+                        <span>Applying...</span>
                       </>
                     ) : (
                       <>
                         <Copy className="h-4 w-4" />
-                        <span>Apply Format to All</span>
+                        <span>Apply to All ({contactCampaigns.length - 1})</span>
                       </>
                     )}
                   </button>
