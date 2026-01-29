@@ -374,9 +374,9 @@ export async function POST(request: NextRequest) {
     
     // Intelligently split into sections:
     // - greeting: First paragraph (usually "Good morning [Name],")
-    // - context_p1: Opening context and introduction
-    // - value_p2: Value proposition and details
-    // - cta: Closing call-to-action and sign-off
+    // - context_p1: Opening context and introduction (MAIN BODY)
+    // - value_p2: Value proposition and details (optional)
+    // - cta: Closing call-to-action and sign-off (optional)
     
     let greeting = ''
     let context_p1 = ''
@@ -390,19 +390,24 @@ export async function POST(request: NextRequest) {
       return /^(good\s+morning|good\s+afternoon|good\s+evening|hi|hello|dear|hey)\s+[\w\s]+,?\s*$/i.test(text)
     }
     
-    // Check if the template has lists - if so, don't split it, keep together
-    const hasLists = /<ul[\s>]|<ol[\s>]|●|•|^\d+\./mi.test(body)
+    // Check if the template has lists - if so, DON'T SPLIT, keep the entire body intact
+    const hasLists = /<ul[\s>]|<ol[\s>]|<li[\s>]/i.test(body)
     
-    if (hasLists && paragraphs.length >= 2) {
-      // Template has bullet/numbered lists - keep body together to preserve formatting
-      console.log('[GENERATE-CLAUDE] Template has lists, keeping body together')
-      if (isGreetingParagraph(paragraphs[0])) {
-        greeting = paragraphs[0]
-        // Join all remaining paragraphs - they'll stay formatted
-        context_p1 = paragraphs.slice(1).join(isHtmlBody ? '' : '\n\n')
+    if (hasLists) {
+      // Template has HTML lists - keep the ORIGINAL body intact, just extract greeting
+      console.log('[GENERATE-CLAUDE] Template has HTML lists, preserving original structure')
+      
+      // Find and extract the first <p> that contains a greeting
+      const firstPMatch = body.match(/^(\s*<p[^>]*>[\s\S]*?<\/p>)/i)
+      if (firstPMatch && isGreetingParagraph(firstPMatch[1])) {
+        greeting = firstPMatch[1]
+        // Keep everything after the greeting paragraph as context_p1
+        context_p1 = body.substring(firstPMatch[0].length).trim()
+        console.log('[GENERATE-CLAUDE] Extracted greeting, rest of body preserved intact')
       } else {
-        // No clear greeting paragraph, put everything in context_p1
-        context_p1 = paragraphs.join(isHtmlBody ? '' : '\n\n')
+        // No clear greeting, put everything in context_p1
+        context_p1 = body
+        console.log('[GENERATE-CLAUDE] No greeting found, entire body in context_p1')
       }
     } else if (paragraphs.length >= 4) {
       greeting = paragraphs[0]
