@@ -345,8 +345,27 @@ export async function POST(request: NextRequest) {
     console.log('[GENERATE-CLAUDE] Body length:', body?.length)
 
     // Parse body into structured format for GmailEmailComposer
-    // Split body into paragraphs - preserve formatting
-    const paragraphs = body.split(/\n\n+/).filter((p: string) => p.trim())
+    // Handle both plain text (split by \n\n) and HTML (split by </p><p> or </p>\s*<p>)
+    let paragraphs: string[]
+    
+    // Check if body is HTML formatted (has <p> tags)
+    const isHtmlBody = /<p[\s>]/i.test(body)
+    
+    if (isHtmlBody) {
+      // HTML body - extract individual <p>...</p> sections
+      // This regex matches <p>...</p> blocks, handling empty paragraphs too
+      const pMatches = body.match(/<p[^>]*>[\s\S]*?<\/p>/gi) || []
+      // Filter out empty paragraphs (just <p></p> or <p>&nbsp;</p> or <p> </p>)
+      paragraphs = pMatches.filter(p => {
+        const content = p.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').trim()
+        return content.length > 0
+      })
+      console.log('[GENERATE-CLAUDE] HTML body detected, extracted', paragraphs.length, 'non-empty paragraphs')
+    } else {
+      // Plain text body - split by double newlines
+      paragraphs = body.split(/\n\n+/).filter((p: string) => p.trim())
+      console.log('[GENERATE-CLAUDE] Plain text body detected')
+    }
     
     console.log('[GENERATE-CLAUDE] Paragraph count:', paragraphs.length)
     paragraphs.forEach((p, i) => {
@@ -364,6 +383,13 @@ export async function POST(request: NextRequest) {
     let value_p2 = ''
     let cta = ''
     
+    // Helper to check if a paragraph is just a greeting (short, ends with comma)
+    const isGreetingParagraph = (p: string): boolean => {
+      const text = p.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').trim()
+      // Match: Good morning Name, | Hi Name, | Hello Name, | Dear Name, etc.
+      return /^(good\s+morning|good\s+afternoon|good\s+evening|hi|hello|dear|hey)\s+[\w\s]+,?\s*$/i.test(text)
+    }
+    
     if (paragraphs.length >= 4) {
       greeting = paragraphs[0]
       // Find where the sign-off starts (usually last 2-3 paragraphs)
@@ -376,18 +402,46 @@ export async function POST(request: NextRequest) {
       )
       
       const splitPoint = signOffIndex > 0 ? signOffIndex : Math.ceil(paragraphs.length * 0.6)
-      context_p1 = paragraphs.slice(1, Math.ceil(splitPoint / 2) + 1).join('\n\n')
-      value_p2 = paragraphs.slice(Math.ceil(splitPoint / 2) + 1, splitPoint).join('\n\n')
-      cta = paragraphs.slice(splitPoint).join('\n\n')
+      context_p1 = paragraphs.slice(1, Math.ceil(splitPoint / 2) + 1).join(isHtmlBody ? '' : '\n\n')
+      value_p2 = paragraphs.slice(Math.ceil(splitPoint / 2) + 1, splitPoint).join(isHtmlBody ? '' : '\n\n')
+      cta = paragraphs.slice(splitPoint).join(isHtmlBody ? '' : '\n\n')
     } else if (paragraphs.length === 3) {
       greeting = paragraphs[0]
       context_p1 = paragraphs[1]
       cta = paragraphs[2]
     } else if (paragraphs.length === 2) {
-      greeting = paragraphs[0]
-      cta = paragraphs[1]
+      // Check if first paragraph is a greeting
+      if (isGreetingParagraph(paragraphs[0])) {
+        greeting = paragraphs[0]
+        cta = paragraphs[1]
+      } else {
+        context_p1 = paragraphs[0]
+        cta = paragraphs[1]
+      }
     } else if (paragraphs.length === 1) {
-      context_p1 = paragraphs[0]
+      // Single paragraph - check if it starts with a greeting
+      const singleParagraph = paragraphs[0]
+      const text = singleParagraph.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').trim()
+      
+      // Check for greeting pattern at start: "Good morning Name, ..."
+      const greetingMatch = text.match(/^((?:good\s+morning|good\s+afternoon|good\s+evening|hi|hello|dear|hey)\s+[\w\s]+),?\s*/i)
+      
+      if (greetingMatch) {
+        console.log('[GENERATE-CLAUDE] Extracting greeting from single paragraph:', greetingMatch[0])
+        greeting = greetingMatch[1] + ','
+        // Remove the greeting from context_p1
+        // For HTML, we need to remove the first <p> if it's just the greeting, or just the text
+        if (isHtmlBody) {
+          // Check if there's a separate <p> for the greeting
+          const pMatches = singleParagraph.match(/<p[^>]*>[\s\S]*?<\/p>/gi) || []
+          // This shouldn't happen since we're in the length === 1 case, but handle it
+          context_p1 = singleParagraph
+        } else {
+          context_p1 = text.substring(greetingMatch[0].length).trim()
+        }
+      } else {
+        context_p1 = singleParagraph
+      }
     }
     
     console.log('[GENERATE-CLAUDE] ========== AFTER SPLITTING ==========')

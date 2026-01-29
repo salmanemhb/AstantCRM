@@ -604,9 +604,65 @@ function buildHtmlEmail(body: any, contact: any, senderId: string, banner?: Emai
           console.log('[BUILD-HTML] body.context_p1 (first 200 chars):', JSON.stringify(body.context_p1?.substring(0, 200)))
           console.log('[BUILD-HTML] body.value_p2 (first 100 chars):', JSON.stringify(body.value_p2?.substring(0, 100)))
           
-          const greetingOut = formatParagraph(body.greeting || `Good morning ${firstName},`)
-          const context1Cleaned = stripDuplicateGreeting(body.context_p1 || '', body.greeting)
-          console.log('[BUILD-HTML] After stripDuplicateGreeting, context_p1 starts with:', JSON.stringify(context1Cleaned?.substring(0, 100)))
+          // Helper to check if text starts with a greeting pattern
+          const startsWithGreeting = (text: string): boolean => {
+            if (!text) return false
+            const normalized = text.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim().toLowerCase()
+            return /^(good\s+morning|good\s+afternoon|good\s+evening|hi|hello|dear|hey)\s+/i.test(normalized)
+          }
+          
+          // Helper to extract greeting from text if it starts with one
+          const extractGreetingFromText = (text: string): { greeting: string, rest: string } => {
+            if (!text) return { greeting: '', rest: '' }
+            
+            // Try to find greeting in first <p> tag
+            const pMatch = text.match(/^<p[^>]*>([\s\S]*?)<\/p>\s*/i)
+            if (pMatch) {
+              const firstPContent = pMatch[1]
+              const normalized = firstPContent.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim().toLowerCase()
+              
+              // Check if first paragraph is just a greeting (ends with comma or is very short)
+              if (/^(good\s+morning|good\s+afternoon|good\s+evening|hi|hello|dear|hey)\s+[\w\s]+,?\s*$/i.test(normalized)) {
+                console.log('[BUILD-HTML] Extracted greeting from context_p1:', JSON.stringify(pMatch[0]))
+                // Remove empty paragraphs after the greeting
+                let rest = text.substring(pMatch[0].length).replace(/^(?:<p[^>]*>\s*<\/p>\s*)+/gi, '')
+                return { greeting: pMatch[0], rest }
+              }
+            }
+            
+            return { greeting: '', rest: text }
+          }
+          
+          let greetingOut: string
+          let context1Cleaned: string
+          
+          if (body.greeting && body.greeting.trim()) {
+            // We have an explicit greeting - use it and strip from context_p1
+            greetingOut = formatParagraph(body.greeting)
+            context1Cleaned = stripDuplicateGreeting(body.context_p1 || '', body.greeting)
+            console.log('[BUILD-HTML] Using explicit greeting from body.greeting')
+          } else if (startsWithGreeting(body.context_p1 || '')) {
+            // No explicit greeting but context_p1 starts with one - extract it
+            const extracted = extractGreetingFromText(body.context_p1 || '')
+            if (extracted.greeting) {
+              greetingOut = formatParagraph(extracted.greeting.replace(/<\/?p[^>]*>/gi, ''))
+              context1Cleaned = extracted.rest
+              console.log('[BUILD-HTML] Extracted greeting from context_p1, NOT adding fallback')
+            } else {
+              // Fallback - couldn't extract cleanly
+              greetingOut = formatParagraph(`Good morning ${firstName},`)
+              context1Cleaned = body.context_p1 || ''
+              console.log('[BUILD-HTML] Could not extract greeting cleanly, using fallback')
+            }
+          } else {
+            // No greeting anywhere - use fallback
+            greetingOut = formatParagraph(`Good morning ${firstName},`)
+            context1Cleaned = body.context_p1 || ''
+            console.log('[BUILD-HTML] No greeting found, using fallback')
+          }
+          
+          console.log('[BUILD-HTML] Final greeting (first 100):', JSON.stringify(greetingOut?.substring(0, 100)))
+          console.log('[BUILD-HTML] Final context_p1 (first 200):', JSON.stringify(context1Cleaned?.substring(0, 200)))
           
           const parts = [
             greetingOut,
