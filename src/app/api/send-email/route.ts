@@ -19,6 +19,14 @@ const FROM_DOMAIN = process.env.FROM_DOMAIN || 'astantglobal.com'
 const DEFAULT_FROM_EMAIL = `info@${FROM_DOMAIN}`
 const DEFAULT_FROM_NAME = COMPANY_INFO.name
 
+// CC emails - all replies will be visible to these addresses
+// Add team members who should be copied on all outgoing emails
+const CC_EMAILS = [
+  'jean.francois@astantglobal.com',
+  'marcos.agustin@astantglobal.com',
+  'salman@astantglobal.com',
+]
+
 // Rate limiting for bulk: 10 emails/second
 const BATCH_SIZE = 10
 const BATCH_DELAY_MS = 1100
@@ -165,15 +173,20 @@ export async function POST(request: NextRequest) {
       console.log('=== DRY RUN EMAIL ===')
       console.log('From:', `${sender.name} <${sender.email}>`)
       console.log('To:', toEmail)
+      console.log('CC:', CC_EMAILS.filter(cc => cc !== sender.email).join(', '))
       console.log('Subject:', email.subject)
       console.log('Body preview:', textBody.substring(0, 200))
       console.log('Attachments:', attachments?.length || 0)
       messageId = `dry-run-${Date.now()}`
     } else if (resend) {
+      // Filter out sender from CC list to avoid duplicate emails
+      const ccEmails = CC_EMAILS.filter(cc => cc !== sender.email && cc !== toEmail)
+      
       // Send via Resend SDK with proper headers for deliverability
       const resendPayload: any = {
         from: `${sender.name} <${sender.email}>`,
         to: [toEmail],
+        cc: ccEmails.length > 0 ? ccEmails : undefined,
         subject: email.subject,
         html: htmlBody,
         text: textBody,
