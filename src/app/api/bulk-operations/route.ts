@@ -6,7 +6,24 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 
+// Helper to get the base URL for internal API calls
+function getBaseUrl(request: NextRequest): string {
+  // Try to get from request headers first (most reliable)
+  const host = request.headers.get('host')
+  const protocol = request.headers.get('x-forwarded-proto') || 'http'
+  
+  if (host) {
+    return `${protocol}://${host}`
+  }
+  
+  // Fallback to environment variable or localhost
+  return process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
+}
+
 export async function POST(request: NextRequest) {
+  const baseUrl = getBaseUrl(request)
+  console.log('[BULK-OPS] Using base URL:', baseUrl)
+  
   try {
     const body = await request.json()
     const {
@@ -150,7 +167,8 @@ export async function POST(request: NextRequest) {
           const batchResults = await Promise.all(
             batch.map(async (email) => {
               try {
-                const response = await fetch(`${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/send-email`, {
+                console.log(`[BULK-OPS] Sending email ${email.id} via ${baseUrl}/api/send-email`)
+                const response = await fetch(`${baseUrl}/api/send-email`, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ email_id: email.id, dry_run: isDryRun }),
@@ -207,7 +225,7 @@ export async function POST(request: NextRequest) {
           try {
             const contactCampaign = email.contact_campaigns as any
             
-            const response = await fetch(`${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/generate-claude`, {
+            const response = await fetch(`${baseUrl}/api/generate-claude`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
