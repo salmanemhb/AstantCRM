@@ -26,6 +26,7 @@ const CC_EMAILS = [
   'marcos.agustin@astantglobal.com',
   'salman@astantglobal.com',
   'miguel.eugene@astantglobal.com',
+  'ana.birkenfeld@astantglobal.com',
 ]
 
 // Rate limiting for bulk: 10 emails/second

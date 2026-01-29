@@ -34,7 +34,7 @@ export const TEAM_MEMBERS: TeamMember[] = [
     id: 'fahd',
     name: 'Fahd El Ghorfi',
     firstName: 'Fahd',
-    title: 'Chief Investment Officer & Co-Founder',
+    title: 'Chief Operating Officer & Co-Founder',
     email: 'fahd.el.ghorfi@astantglobal.com',
   },
   {
@@ -48,7 +48,7 @@ export const TEAM_MEMBERS: TeamMember[] = [
 
 export const COMPANY_INFO = {
   name: 'Astant Global Management',
-  address: 'Paseo de la Castellana, 280',
+  address: 'Paseo de la Castellana, 268',
   city: 'Madrid, 28046',
   country: 'Spain',
   website: 'www.astantglobal.com',
