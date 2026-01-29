@@ -665,8 +665,9 @@ export default function GmailEmailComposer({
         .join('')
     }
     
+    // NOTE: greeting is handled separately in the UI, NOT in the editor
+    // This prevents duplication when sender changes
     const parts = [
-      body.greeting,
       body.context_p1,
       body.value_p2,
       body.cta
@@ -766,51 +767,40 @@ export default function GmailEmailComposer({
       tempDiv.innerHTML = htmlContent
       const paragraphs = Array.from(tempDiv.querySelectorAll('p')).map(p => p.innerHTML || '')
       
-      // Get original body to preserve structure when user adds/removes paragraphs
+      // Get original body to preserve greeting (which is displayed separately, not in editor)
       const originalBody = email.current_body || email.original_body || {}
       
-      // Smart paragraph mapping: preserve original fields if paragraph count changed significantly
-      // This prevents content loss when user structure differs from expected 4-paragraph format
+      // Editor now contains: context_p1, value_p2, cta (greeting is separate)
+      // Map paragraphs to these 3 fields
       let updatedBody: EmailJsonBody
       
-      if (paragraphs.length >= 4) {
-        // Standard 4+ paragraph structure
+      if (paragraphs.length >= 3) {
+        // Standard 3+ paragraph structure (context_p1, value_p2, cta)
         updatedBody = {
-          greeting: paragraphs[0] || '',
-          context_p1: paragraphs[1] || '',
-          value_p2: paragraphs[2] || '',
-          cta: paragraphs.slice(3).join('\n\n') || '',
-          signature: getSignatureText(signatureMemberId),
-          signatureMemberId: signatureMemberId,
-          bannerEnabled: bannerEnabled
-        }
-      } else if (paragraphs.length === 3) {
-        // 3 paragraphs: greeting, combined body, cta
-        updatedBody = {
-          greeting: paragraphs[0] || '',
-          context_p1: paragraphs[1] || '',
-          value_p2: '', // Empty, content merged into context_p1
-          cta: paragraphs[2] || '',
+          greeting: originalBody.greeting || '', // Preserve greeting from original
+          context_p1: paragraphs[0] || '',
+          value_p2: paragraphs[1] || '',
+          cta: paragraphs.slice(2).join('\n\n') || '',
           signature: getSignatureText(signatureMemberId),
           signatureMemberId: signatureMemberId,
           bannerEnabled: bannerEnabled
         }
       } else if (paragraphs.length === 2) {
-        // 2 paragraphs: greeting and cta only
+        // 2 paragraphs: context_p1 and cta
         updatedBody = {
-          greeting: paragraphs[0] || '',
-          context_p1: originalBody.context_p1 || '', // Preserve original
-          value_p2: originalBody.value_p2 || '', // Preserve original
+          greeting: originalBody.greeting || '',
+          context_p1: paragraphs[0] || '',
+          value_p2: '', // Empty
           cta: paragraphs[1] || '',
           signature: getSignatureText(signatureMemberId),
           signatureMemberId: signatureMemberId,
           bannerEnabled: bannerEnabled
         }
       } else {
-        // 1 or 0 paragraphs - preserve original body, just update what we have
+        // 1 or 0 paragraphs - preserve original body fields
         updatedBody = {
-          greeting: paragraphs[0] || originalBody.greeting || '',
-          context_p1: originalBody.context_p1 || '',
+          greeting: originalBody.greeting || '',
+          context_p1: paragraphs[0] || originalBody.context_p1 || '',
           value_p2: originalBody.value_p2 || '',
           cta: originalBody.cta || '',
           signature: getSignatureText(signatureMemberId),
@@ -855,16 +845,20 @@ export default function GmailEmailComposer({
     const htmlContent = editor.getHTML()
     
     // Parse paragraphs from HTML to build body structure
+    // Note: greeting is NOT in the editor, it's displayed separately
     const tempDiv = document.createElement('div')
     tempDiv.innerHTML = htmlContent
     const paragraphs = Array.from(tempDiv.querySelectorAll('p')).map(p => p.innerHTML || '')
     
-    // Build the body structure
+    // Get greeting from original body (it's not in the editor)
+    const originalBody = email.current_body || email.original_body || {}
+    
+    // Build the body structure - editor has context_p1, value_p2, cta
     const bodyStructure = {
-      greeting: paragraphs[0] || '',
-      context_p1: paragraphs[1] || '',
-      value_p2: paragraphs[2] || '',
-      cta: paragraphs.slice(3).join('\n\n') || ''
+      greeting: originalBody.greeting || '',
+      context_p1: paragraphs[0] || '',
+      value_p2: paragraphs[1] || '',
+      cta: paragraphs.slice(2).join('\n\\n') || ''
     }
     
     // Get sender's first name
@@ -1128,6 +1122,16 @@ export default function GmailEmailComposer({
 
           {/* Email Body Editor */}
           <div className="min-h-[300px]">
+            {/* Greeting - displayed separately, not editable */}
+            {(() => {
+              const body = email.current_body || email.original_body
+              return body?.greeting ? (
+                <div className="px-4 pt-4 pb-2 text-gray-700">
+                  <span dangerouslySetInnerHTML={{ __html: body.greeting }} />
+                </div>
+              ) : null
+            })()}
+            
             <EditorContent 
               editor={editor} 
               className="prose prose-sm max-w-none px-4 py-4 min-h-[250px] focus:outline-none [&_.ProseMirror]:min-h-[250px] [&_.ProseMirror]:focus:outline-none [&_.ProseMirror_p]:my-3 [&_.ProseMirror_p]:text-justify"
@@ -1248,11 +1252,12 @@ export default function GmailEmailComposer({
                   console.log('[SenderChange] Paragraphs extracted with HTML:', paragraphs.map(p => p.substring(0, 80)))
                   
                   // Build body from editor content - HTML included
+                  // Note: greeting is NOT in the editor, it's displayed separately
                   const bodyFromEditor: EmailJsonBody = {
-                    greeting: paragraphs[0] || currentBody?.greeting || '',
-                    context_p1: paragraphs[1] || currentBody?.context_p1 || '',
-                    value_p2: paragraphs[2] || currentBody?.value_p2 || '',
-                    cta: paragraphs.slice(3).join('\n\n') || currentBody?.cta || '',
+                    greeting: currentBody?.greeting || '', // Preserve greeting from currentBody
+                    context_p1: paragraphs[0] || currentBody?.context_p1 || '',
+                    value_p2: paragraphs[1] || currentBody?.value_p2 || '',
+                    cta: paragraphs.slice(2).join('\n\n') || currentBody?.cta || '',
                     signature: newSignature,
                     signatureMemberId: id,
                     bannerEnabled: bannerEnabled
@@ -1268,8 +1273,8 @@ export default function GmailEmailComposer({
                   console.log('[SenderChange] Updated body - context_p1:', updatedBody.context_p1?.substring(0, 80))
                   
                   // Update the editor content with new sender name - HTML formatting preserved
+                  // Note: greeting is NOT in the editor, only context_p1, value_p2, cta
                   const newHtml = `
-                    <p>${updatedBody.greeting || ''}</p>
                     <p>${updatedBody.context_p1 || ''}</p>
                     <p>${updatedBody.value_p2 || ''}</p>
                     <p>${updatedBody.cta || ''}</p>

@@ -446,6 +446,7 @@ function CreateCampaignModal({
       template_body: selectedTemplate.body,
       status: 'ready',
       contacts_count: 0,
+      sender_id: selectedSender, // Store sender_id directly on campaign
       global_context: JSON.stringify({ sender_id: selectedSender, template_id: selectedTemplate.id }),
     }
 

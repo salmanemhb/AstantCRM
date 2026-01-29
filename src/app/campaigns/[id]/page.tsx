@@ -45,6 +45,7 @@ interface LocalCampaign {
   cta?: string
   fallback_strategy?: string | null
   created_at: string
+  sender_id?: string
 }
 
 interface ExtendedContactCampaign extends ContactCampaign {
@@ -436,10 +437,21 @@ export default function CampaignDetailPage() {
         await new Promise(resolve => setTimeout(resolve, 100))
 
         console.log('[handleAddContacts] Generating draft...')
+        // Get sender_id from campaign global_context or campaign.sender_id
+        let campaignSenderId = campaign?.sender_id || 'jean-francois'
+        if (campaign?.global_context) {
+          try {
+            const ctx = typeof campaign.global_context === 'string' 
+              ? JSON.parse(campaign.global_context) 
+              : campaign.global_context
+            if (ctx.sender_id) campaignSenderId = ctx.sender_id
+          } catch {}
+        }
         await generateDraft({
           contact_id: contactId,
           campaign_id: campaignId,
           signature: 'Best regards,\nAstant Global Management',
+          config: { sender_id: campaignSenderId },
         })
         console.log('[handleAddContacts] Draft generated for contact:', contactId)
         setGeneratingProgress(((i + 1) / newContacts.length) * 100)
