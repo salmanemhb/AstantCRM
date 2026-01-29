@@ -370,6 +370,22 @@ function buildHtmlEmail(body: any, contact: any, senderId: string, banner?: Emai
   const formatParagraph = (text: string) => {
     if (!text) return ''
     
+    // Check if content already has <p> tags (from TipTap HTML)
+    const hasExistingPTags = /<p[\s>]/i.test(text)
+    
+    if (hasExistingPTags) {
+      // Content already has paragraph structure - clean and style it
+      // This handles TipTap output that's already HTML formatted
+      return text
+        // Add styling to existing <p> tags (handle both <p> and <p ...>)
+        .replace(/<p(\s[^>]*)?>/gi, '<p style="margin: 0 0 16px 0; line-height: 1.6; text-align: justify; text-justify: inter-word;">')
+        // Remove empty paragraphs
+        .replace(/<p[^>]*>\s*<\/p>/gi, '')
+        // Ensure links have proper styling
+        .replace(/<a\s+([^>]*href="[^"]+")[^>]*>/gi, '<a $1 style="color: #0066cc; text-decoration: underline;">')
+    }
+    
+    // Plain text or text without <p> tags - convert to HTML paragraphs
     // Split by double newlines for paragraph breaks
     const paragraphs = text.split(/\n\n+/).filter(p => p.trim())
     
@@ -495,6 +511,28 @@ function buildHtmlEmail(body: any, contact: any, senderId: string, banner?: Emai
 function buildTextEmail(body: any, senderId: string): string {
   const sender = getMemberById(senderId)
   
+  // Helper to strip HTML tags and convert to plain text
+  const stripHtml = (html: string): string => {
+    if (!html) return ''
+    return html
+      // Replace </p><p> with double newlines (paragraph breaks)
+      .replace(/<\/p>\s*<p[^>]*>/gi, '\n\n')
+      // Replace <br> with newlines
+      .replace(/<br\s*\/?>/gi, '\n')
+      // Remove all other HTML tags
+      .replace(/<[^>]+>/g, '')
+      // Decode HTML entities
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#039;/g, "'")
+      // Clean up extra whitespace
+      .replace(/\n{3,}/g, '\n\n')
+      .trim()
+  }
+  
   const textSignature = sender ? `
 ${sender.name}
 ${sender.title}
@@ -506,13 +544,13 @@ ${COMPANY_INFO.website}
 ` : body.signature || ''
 
   return [
-    body.greeting,
+    stripHtml(body.greeting),
     '',
-    body.context_p1,
+    stripHtml(body.context_p1),
     '',
-    body.value_p2,
+    stripHtml(body.value_p2),
     '',
-    body.cta,
+    stripHtml(body.cta),
     '',
     '---',
     textSignature.trim()
