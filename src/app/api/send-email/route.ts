@@ -381,28 +381,26 @@ function buildHtmlEmail(body: any, contact: any, senderId: string, banner?: Emai
   // Helper to remove duplicate greeting from context_p1 if it matches the greeting field
   // This fixes the issue where pasted templates have greeting in both fields
   const stripDuplicateGreeting = (text: string, greeting: string): string => {
-    if (!text || !greeting) return text
+    if (!text) return text
     
-    // Normalize for comparison (strip HTML, lowercase, trim)
-    const normalizeForCompare = (s: string) => s.replace(/<[^>]+>/g, '').toLowerCase().trim()
-    const greetingNorm = normalizeForCompare(greeting)
-    
-    // Check if text starts with a greeting-like pattern
-    const greetingPatterns = [
-      /^<p[^>]*>.*?(good morning|good afternoon|good evening|hello|hi|dear)\s+[^,<]+,?\s*<\/p>/i,
-      /^(good morning|good afternoon|good evening|hello|hi|dear)\s+[^,\n]+,?\s*\n*/i,
-    ]
-    
-    for (const pattern of greetingPatterns) {
-      const match = text.match(pattern)
-      if (match) {
-        const matchedGreeting = normalizeForCompare(match[0])
-        // If the matched greeting is similar to the actual greeting, strip it
-        if (matchedGreeting.includes(greetingNorm.slice(0, 15)) || 
-            greetingNorm.includes(matchedGreeting.slice(0, 15))) {
-          return text.slice(match[0].length).trim()
-        }
-      }
+    // If we have a greeting already, strip ANY greeting pattern from start of context_p1
+    if (greeting) {
+      // Strip greeting patterns from start of text (both HTML and plain text)
+      let cleaned = text
+      
+      // Pattern 1: Greeting in a paragraph tag
+      // e.g., <p>Good morning Salmane,</p>
+      cleaned = cleaned.replace(/^<p[^>]*>\s*(good\s+morning|good\s+afternoon|good\s+evening|hello|hi|dear)\s+[^<]+,?\s*<\/p>\s*/i, '')
+      
+      // Pattern 2: Greeting as plain text at start
+      // e.g., "Good morning Salmane,\n\n"
+      cleaned = cleaned.replace(/^(good\s+morning|good\s+afternoon|good\s+evening|hello|hi|dear)\s+[^,\n]+,?\s*\n*/i, '')
+      
+      // Pattern 3: Multiple greeting paragraphs (clean up any remaining)
+      cleaned = cleaned.replace(/^<p[^>]*>\s*<\/p>\s*/g, '') // Remove empty paragraphs
+      
+      console.log('[stripDuplicateGreeting] Greeting exists, cleaned text starts with:', cleaned.substring(0, 100))
+      return cleaned.trim()
     }
     
     return text
@@ -588,19 +586,20 @@ ${COMPANY_INFO.website}
 
   // Helper to strip duplicate greeting from context_p1
   const stripDuplicateGreetingText = (text: string, greeting: string): string => {
-    if (!text || !greeting) return text
-    const greetingClean = stripHtml(greeting).toLowerCase().trim()
-    const textClean = stripHtml(text)
-    const textLower = textClean.toLowerCase()
+    if (!text) return ''
     
-    // Check if text starts with same greeting pattern
-    if (textLower.startsWith(greetingClean.slice(0, Math.min(15, greetingClean.length)))) {
-      // Find where the first paragraph ends
-      const firstNewline = textClean.indexOf('\n\n')
-      if (firstNewline > 0) {
-        return textClean.slice(firstNewline + 2).trim()
-      }
+    const textClean = stripHtml(text)
+    
+    // If we have a greeting, strip ANY greeting pattern from start
+    if (greeting) {
+      // Remove greeting patterns from start
+      const cleaned = textClean
+        .replace(/^(good\s+morning|good\s+afternoon|good\s+evening|hello|hi|dear)\s+[^,\n]+,?\s*\n*/i, '')
+        .trim()
+      
+      return cleaned
     }
+    
     return textClean
   }
 
