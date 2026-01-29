@@ -144,6 +144,20 @@ export async function POST(request: NextRequest) {
     //           3) campaign.sender_id, 
     //           4) default
     const emailBody = email.current_body || email.original_body
+    
+    console.log('[SEND-EMAIL] ========== EMAIL BODY FROM DATABASE ==========')
+    console.log('[SEND-EMAIL] emailBody.greeting:', JSON.stringify(emailBody?.greeting?.substring(0, 100)))
+    console.log('[SEND-EMAIL] emailBody.context_p1 (first 200):', JSON.stringify(emailBody?.context_p1?.substring(0, 200)))
+    console.log('[SEND-EMAIL] emailBody.value_p2 (first 100):', JSON.stringify(emailBody?.value_p2?.substring(0, 100)))
+    console.log('[SEND-EMAIL] emailBody.cta (first 100):', JSON.stringify(emailBody?.cta?.substring(0, 100)))
+    
+    // Check for greeting in context_p1
+    const greetingNormDB = emailBody?.greeting?.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim().toLowerCase()
+    const contextNormDB = emailBody?.context_p1?.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim().toLowerCase()
+    if (greetingNormDB && contextNormDB && contextNormDB.startsWith(greetingNormDB)) {
+      console.log('[SEND-EMAIL] !!! WARNING: Database has greeting duplicated in context_p1 !!!')
+    }
+    
     const senderId = emailBody?.signatureMemberId 
       || email.contact_campaign?.sender_id 
       || campaign?.sender_id 

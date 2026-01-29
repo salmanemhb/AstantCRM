@@ -628,6 +628,19 @@ export default function CampaignDetailPage() {
 
   const handleSaveEmail = async (emailId: string, updates: Partial<Email>) => {
     setError(null) // Clear any previous errors
+    
+    console.log('[handleSaveEmail] ========== SAVING TO DATABASE ==========')
+    console.log('[handleSaveEmail] emailId:', emailId)
+    console.log('[handleSaveEmail] updates.current_body?.greeting:', JSON.stringify(updates.current_body?.greeting?.substring(0, 100)))
+    console.log('[handleSaveEmail] updates.current_body?.context_p1 (first 200):', JSON.stringify(updates.current_body?.context_p1?.substring(0, 200)))
+    
+    // Check for duplication bug
+    const greetingNormSave = updates.current_body?.greeting?.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim().toLowerCase()
+    const contextNormSave = updates.current_body?.context_p1?.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim().toLowerCase()
+    if (greetingNormSave && contextNormSave && contextNormSave.startsWith(greetingNormSave)) {
+      console.log('[handleSaveEmail] !!! BUG: Saving email with greeting duplicated in context_p1 !!!')
+    }
+    
     try {
       const { error: saveError } = await supabase.from('emails').update(updates).eq('id', emailId)
       if (saveError) throw saveError

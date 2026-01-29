@@ -340,9 +340,18 @@ export async function POST(request: NextRequest) {
     // Body now includes signature via [SENDER_*] placeholders
     const fullBody = body
 
+    console.log('[GENERATE-CLAUDE] ========== TEMPLATE PARSING DEBUG ==========')
+    console.log('[GENERATE-CLAUDE] Raw body (first 300 chars):', JSON.stringify(body?.substring(0, 300)))
+    console.log('[GENERATE-CLAUDE] Body length:', body?.length)
+
     // Parse body into structured format for GmailEmailComposer
     // Split body into paragraphs - preserve formatting
     const paragraphs = body.split(/\n\n+/).filter((p: string) => p.trim())
+    
+    console.log('[GENERATE-CLAUDE] Paragraph count:', paragraphs.length)
+    paragraphs.forEach((p, i) => {
+      console.log(`[GENERATE-CLAUDE] Paragraph ${i}:`, JSON.stringify(p.substring(0, 100)))
+    })
     
     // Intelligently split into sections:
     // - greeting: First paragraph (usually "Good morning [Name],")
@@ -379,6 +388,19 @@ export async function POST(request: NextRequest) {
       cta = paragraphs[1]
     } else if (paragraphs.length === 1) {
       context_p1 = paragraphs[0]
+    }
+    
+    console.log('[GENERATE-CLAUDE] ========== AFTER SPLITTING ==========')
+    console.log('[GENERATE-CLAUDE] greeting:', JSON.stringify(greeting?.substring(0, 100)))
+    console.log('[GENERATE-CLAUDE] context_p1 (first 150):', JSON.stringify(context_p1?.substring(0, 150)))
+    console.log('[GENERATE-CLAUDE] value_p2 (first 100):', JSON.stringify(value_p2?.substring(0, 100)))
+    console.log('[GENERATE-CLAUDE] cta (first 100):', JSON.stringify(cta?.substring(0, 100)))
+    
+    // Check if context_p1 starts with the greeting (this would be a BUG)
+    const greetingNormCheck = greeting?.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim().toLowerCase()
+    const contextNormCheck = context_p1?.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim().toLowerCase()
+    if (greetingNormCheck && contextNormCheck && contextNormCheck.startsWith(greetingNormCheck)) {
+      console.log('[GENERATE-CLAUDE] !!! BUG DETECTED: context_p1 starts with greeting !!!')
     }
     
     // Create structured email body

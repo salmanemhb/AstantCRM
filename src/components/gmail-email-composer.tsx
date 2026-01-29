@@ -645,6 +645,11 @@ export default function GmailEmailComposer({
   // Build the email body content (excluding signature)
   const getEmailBodyHtml = useCallback(() => {
     const body = email.current_body || email.original_body
+    console.log('[getEmailBodyHtml] ========== LOADING EMAIL INTO EDITOR ==========')
+    console.log('[getEmailBodyHtml] email.id:', email.id)
+    console.log('[getEmailBodyHtml] body.greeting:', JSON.stringify(body?.greeting?.substring(0, 100)))
+    console.log('[getEmailBodyHtml] body.context_p1 (first 200):', JSON.stringify(body?.context_p1?.substring(0, 200)))
+    console.log('[getEmailBodyHtml] body.value_p2 (first 100):', JSON.stringify(body?.value_p2?.substring(0, 100)))
     if (!body) return ''
     
     // Helper to convert text with line breaks to proper HTML paragraphs
@@ -714,6 +719,9 @@ export default function GmailEmailComposer({
     // This prevents duplication when sender changes
     // Also strip any greeting that might be duplicated in context_p1
     const cleanedContext = stripGreetingFromContext(body.context_p1 || '', body.greeting || '')
+    
+    console.log('[getEmailBodyHtml] cleanedContext (first 200):', JSON.stringify(cleanedContext?.substring(0, 200)))
+    console.log('[getEmailBodyHtml] Did stripping occur?', cleanedContext !== body.context_p1)
     
     const parts = [
       cleanedContext,
@@ -806,17 +814,29 @@ export default function GmailEmailComposer({
     if (!editor) return
     setIsSaving(true)
     
+    console.log('[handleSave] ========== SAVING EMAIL ==========')
+    console.log('[handleSave] email.id:', email.id)
+    
     try {
       // Get the HTML content - preserve formatting (bold, italic, etc.)
       const htmlContent = editor.getHTML()
+      
+      console.log('[handleSave] Editor HTML content (first 300):', JSON.stringify(htmlContent?.substring(0, 300)))
       
       // Parse paragraphs from HTML, preserving inner HTML (including <strong>, <em>, etc.)
       const tempDiv = document.createElement('div')
       tempDiv.innerHTML = htmlContent
       const paragraphs = Array.from(tempDiv.querySelectorAll('p')).map(p => p.innerHTML || '')
       
+      console.log('[handleSave] Paragraph count from editor:', paragraphs.length)
+      paragraphs.forEach((p, i) => {
+        console.log(`[handleSave] Paragraph ${i}:`, JSON.stringify(p?.substring(0, 100)))
+      })
+      
       // Get original body to preserve greeting (which is displayed separately, not in editor)
       const originalBody = email.current_body || email.original_body || {}
+      
+      console.log('[handleSave] originalBody.greeting:', JSON.stringify(originalBody.greeting?.substring(0, 100)))
       
       // SAFEGUARD: Strip greeting from first paragraph if it duplicates the stored greeting
       // This can happen if the database already had greeting embedded in context_p1
@@ -903,6 +923,18 @@ export default function GmailEmailComposer({
           signatureMemberId: signatureMemberId,
           bannerEnabled: bannerEnabled
         }
+      }
+      
+      console.log('[handleSave] ========== FINAL BODY TO SAVE ==========')
+      console.log('[handleSave] updatedBody.greeting:', JSON.stringify(updatedBody.greeting?.substring(0, 100)))
+      console.log('[handleSave] updatedBody.context_p1 (first 200):', JSON.stringify(updatedBody.context_p1?.substring(0, 200)))
+      console.log('[handleSave] updatedBody.value_p2 (first 100):', JSON.stringify(updatedBody.value_p2?.substring(0, 100)))
+      
+      // Check for greeting duplication
+      const greetingNormFinal = updatedBody.greeting?.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim().toLowerCase()
+      const contextNormFinal = updatedBody.context_p1?.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim().toLowerCase()
+      if (greetingNormFinal && contextNormFinal && contextNormFinal.startsWith(greetingNormFinal)) {
+        console.log('[handleSave] !!! BUG: context_p1 STILL starts with greeting after cleaning !!!')
       }
       
       // Validation: warn if email is essentially empty
@@ -1346,6 +1378,13 @@ export default function GmailEmailComposer({
                   })
                   
                   console.log('[SenderChange] Paragraphs extracted with HTML:', paragraphs.map(p => p.substring(0, 80)))
+                  
+                  // Check if first paragraph contains the greeting (would be a bug)
+                  const greetingNormSender = currentBody?.greeting?.replace(/<[^>]+>/g, '').replace(/\\s+/g, ' ').trim().toLowerCase()
+                  const para0NormSender = paragraphs[0]?.replace(/<[^>]+>/g, '').replace(/\\s+/g, ' ').trim().toLowerCase()
+                  if (greetingNormSender && para0NormSender && para0NormSender.startsWith(greetingNormSender)) {
+                    console.log('[SenderChange] !!! WARNING: paragraphs[0] starts with greeting - this is a bug !!!')
+                  }
                   
                   // Build body from editor content - HTML included
                   // Note: greeting is NOT in the editor, it's displayed separately
