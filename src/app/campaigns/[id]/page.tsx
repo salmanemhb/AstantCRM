@@ -465,6 +465,9 @@ export default function CampaignDetailPage() {
       setContactCampaigns(updatedCc || [])
       setShowAddContacts(false)
       setSelectedContacts([])
+      
+      // Refresh bulk stats to show updated approval counts
+      await refreshBulkStats()
 
       setSuccessMessage(`Generated ${newContacts.length} draft${newContacts.length > 1 ? 's' : ''}!`)
       setTimeout(() => setSuccessMessage(null), 3000)
@@ -551,6 +554,9 @@ export default function CampaignDetailPage() {
       setSelectedContacts([])
       setBatchAddMode(false)
       setGeneratingProgress(0)
+      
+      // Refresh bulk stats to show updated counts
+      await refreshBulkStats()
 
       setSuccessMessage(`Added ${added} contacts! Use "Generate Drafts" button to batch generate emails.`)
       setTimeout(() => setSuccessMessage(null), 5000)
@@ -866,51 +872,6 @@ export default function CampaignDetailPage() {
                 </button>
               )}
               <button onClick={() => setShowAddContacts(true)} className="flex items-center space-x-2 px-4 py-2 bg-brand-600 text-white rounded-lg hover:bg-brand-700 transition-colors"><Plus className="h-4 w-4" /><span>Add VCs</span></button>
-              {bulkStats && bulkStats.ready_to_send > 0 && (
-                <button
-                  onClick={async () => {
-                    if (!confirm(`Send ${bulkStats.ready_to_send} approved emails now?`)) return
-                    setIsSendingAll(true)
-                    try {
-                      const response = await fetch('/api/bulk-operations', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                          operation: 'send_approved',
-                          campaign_id: campaignId,
-                        }),
-                      })
-                      const data = await response.json()
-                      if (data.success) {
-                        setSuccessMessage(`Sent ${data.result.success} emails!`)
-                        setTimeout(() => setSuccessMessage(null), 5000)
-                        refreshBulkStats()
-                        // Refresh contact campaigns to show sent status
-                        const { data: refreshedCCs } = await supabase
-                          .from('contact_campaigns')
-                          .select(`*, contact:contacts(*), emails(*)`)
-                          .eq('campaign_id', campaignId)
-                          .order('created_at', { ascending: false })
-                        if (refreshedCCs) setContactCampaigns(refreshedCCs)
-                      } else {
-                        setError(data.error || 'Failed to send emails')
-                      }
-                    } catch (err: any) {
-                      setError(err.message)
-                    } finally {
-                      setIsSendingAll(false)
-                    }
-                  }}
-                  disabled={isSendingAll}
-                  className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50"
-                >
-                  {isSendingAll ? (
-                    <><Loader2 className="h-4 w-4 animate-spin" /><span>Sending...</span></>
-                  ) : (
-                    <><Send className="h-4 w-4" /><span>Send All ({bulkStats.ready_to_send})</span></>
-                  )}
-                </button>
-              )}
               <button onClick={handleDeleteCampaign} disabled={isDeleting} className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50" title="Delete Campaign"><Trash2 className="h-5 w-5" /></button>
             </div>
           </div>

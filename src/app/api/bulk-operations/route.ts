@@ -127,6 +127,7 @@ export async function POST(request: NextRequest) {
 
       // ============================================
       // SEND ALL APPROVED (supports dry_run)
+      // Optimized for sending 500+ emails efficiently
       // ============================================
       case 'send_dry_run':
       case 'send_approved': {
@@ -137,30 +138,52 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ message: 'No approved emails to send', result: { ...result, total: 0 } })
         }
 
-        // Send each email
-        for (const email of approvedEmails) {
-          try {
-            const response = await fetch(`${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/send-email`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ email_id: email.id, dry_run: isDryRun }),
-            })
+        // Process in batches for better performance
+        // Resend allows ~10 emails/second, so we batch 10 at a time with 1.1s delay
+        const BATCH_SIZE = 10
+        const BATCH_DELAY_MS = 1100
 
-            if (response.ok) {
+        for (let i = 0; i < approvedEmails.length; i += BATCH_SIZE) {
+          const batch = approvedEmails.slice(i, i + BATCH_SIZE)
+          
+          // Send batch in parallel
+          const batchResults = await Promise.all(
+            batch.map(async (email) => {
+              try {
+                const response = await fetch(`${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/send-email`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ email_id: email.id, dry_run: isDryRun }),
+                })
+
+                if (response.ok) {
+                  return { success: true }
+                } else {
+                  const errorData = await response.json()
+                  return { success: false, error: `${email.id}: ${errorData.error}` }
+                }
+              } catch (err: any) {
+                return { success: false, error: `${email.id}: ${err.message}` }
+              }
+            })
+          )
+
+          // Aggregate results
+          for (const r of batchResults) {
+            if (r.success) {
               result.success++
             } else {
               result.failed++
-              const errorData = await response.json()
-              result.errors.push(`${email.id}: ${errorData.error}`)
+              if (r.error) result.errors.push(r.error)
             }
-          } catch (err: any) {
-            result.failed++
-            result.errors.push(`${email.id}: ${err.message}`)
           }
 
-          // Rate limit
-          await new Promise(resolve => setTimeout(resolve, 200))
+          // Rate limit between batches (not after last batch)
+          if (i + BATCH_SIZE < approvedEmails.length) {
+            await new Promise(resolve => setTimeout(resolve, BATCH_DELAY_MS))
+          }
         }
+        
         result.total = approvedEmails.length
         if (isDryRun) {
           result.dry_run = true
