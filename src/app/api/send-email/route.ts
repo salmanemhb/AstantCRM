@@ -520,10 +520,26 @@ function buildHtmlEmail(body: any, contact: any, senderId: string, banner?: Emai
     <tr>
       <td style="padding: 30px 20px; text-align: justify;">
         <!-- Email Body -->
-        ${formatParagraph(body.greeting || `Good morning ${firstName},`)}
-        ${formatParagraph(stripDuplicateGreeting(body.context_p1 || '', body.greeting))}
-        ${formatParagraph(body.value_p2 || '')}
-        ${formatParagraph(body.cta || '')}
+        ${(() => {
+          // DEBUG: Log body structure to understand the issue
+          console.log('[BUILD-HTML] ========== EMAIL BODY DEBUG ==========')
+          console.log('[BUILD-HTML] body.greeting:', JSON.stringify(body.greeting))
+          console.log('[BUILD-HTML] body.context_p1 (first 200 chars):', JSON.stringify(body.context_p1?.substring(0, 200)))
+          console.log('[BUILD-HTML] body.value_p2 (first 100 chars):', JSON.stringify(body.value_p2?.substring(0, 100)))
+          
+          const greetingOut = formatParagraph(body.greeting || `Good morning ${firstName},`)
+          const context1Cleaned = stripDuplicateGreeting(body.context_p1 || '', body.greeting)
+          console.log('[BUILD-HTML] After stripDuplicateGreeting, context_p1 starts with:', JSON.stringify(context1Cleaned?.substring(0, 100)))
+          
+          const parts = [
+            greetingOut,
+            formatParagraph(context1Cleaned),
+            formatParagraph(body.value_p2 || ''),
+            formatParagraph(body.cta || '')
+          ].filter(Boolean).join('\n')
+          
+          return parts
+        })()}
         
         <!-- Signature Section -->
         <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #eeeeee;">
