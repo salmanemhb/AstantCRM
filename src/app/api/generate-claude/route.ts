@@ -348,19 +348,19 @@ export async function POST(request: NextRequest) {
     // Handle both plain text (split by \n\n) and HTML (split by </p><p> or </p>\s*<p>)
     let paragraphs: string[]
     
-    // Check if body is HTML formatted (has <p> tags)
-    const isHtmlBody = /<p[\s>]/i.test(body)
+    // Check if body is HTML formatted (has <p> tags or list tags)
+    const isHtmlBody = /<p[\s>]|<ul[\s>]|<ol[\s>]/i.test(body)
     
     if (isHtmlBody) {
-      // HTML body - extract individual <p>...</p> sections
-      // This regex matches <p>...</p> blocks, handling empty paragraphs too
-      const pMatches = body.match(/<p[^>]*>[\s\S]*?<\/p>/gi) || []
+      // HTML body - extract individual blocks (<p>, <ul>, <ol>)
+      // This regex matches <p>...</p>, <ul>...</ul>, <ol>...</ol> blocks
+      const blockMatches = body.match(/<(?:p|ul|ol)[^>]*>[\s\S]*?<\/(?:p|ul|ol)>/gi) || []
       // Filter out empty paragraphs (just <p></p> or <p>&nbsp;</p> or <p> </p>)
-      paragraphs = pMatches.filter(p => {
+      paragraphs = blockMatches.filter(p => {
         const content = p.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').trim()
         return content.length > 0
       })
-      console.log('[GENERATE-CLAUDE] HTML body detected, extracted', paragraphs.length, 'non-empty paragraphs')
+      console.log('[GENERATE-CLAUDE] HTML body detected, extracted', paragraphs.length, 'non-empty blocks (p/ul/ol)')
     } else {
       // Plain text body - split by double newlines
       paragraphs = body.split(/\n\n+/).filter((p: string) => p.trim())
@@ -390,7 +390,21 @@ export async function POST(request: NextRequest) {
       return /^(good\s+morning|good\s+afternoon|good\s+evening|hi|hello|dear|hey)\s+[\w\s]+,?\s*$/i.test(text)
     }
     
-    if (paragraphs.length >= 4) {
+    // Check if the template has lists - if so, don't split it, keep together
+    const hasLists = /<ul[\s>]|<ol[\s>]|●|•|^\d+\./mi.test(body)
+    
+    if (hasLists && paragraphs.length >= 2) {
+      // Template has bullet/numbered lists - keep body together to preserve formatting
+      console.log('[GENERATE-CLAUDE] Template has lists, keeping body together')
+      if (isGreetingParagraph(paragraphs[0])) {
+        greeting = paragraphs[0]
+        // Join all remaining paragraphs - they'll stay formatted
+        context_p1 = paragraphs.slice(1).join(isHtmlBody ? '' : '\n\n')
+      } else {
+        // No clear greeting paragraph, put everything in context_p1
+        context_p1 = paragraphs.join(isHtmlBody ? '' : '\n\n')
+      }
+    } else if (paragraphs.length >= 4) {
       greeting = paragraphs[0]
       // Find where the sign-off starts (usually last 2-3 paragraphs)
       const signOffIndex = paragraphs.findIndex((p, i) => 
