@@ -657,8 +657,9 @@ export default function GmailEmailComposer({
     const textToHtml = (text: string) => {
       if (!text) return ''
       
-      // If the text already starts with <p>, it's already formatted as HTML
-      if (text.trim().startsWith('<p>') || text.trim().startsWith('<p ')) {
+      // If the text already has block-level HTML elements, it's already formatted
+      // Check for: <p>, <ul>, <ol>, <li>, <div>, <h1-6>
+      if (/<(?:p|ul|ol|li|div|h[1-6])[\s>]/i.test(text.trim())) {
         return text
       }
       

@@ -488,15 +488,22 @@ function buildHtmlEmail(body: any, contact: any, senderId: string, banner?: Emai
   const formatParagraph = (text: string) => {
     if (!text) return ''
     
-    // Check if content already has <p> tags (from TipTap HTML)
-    const hasExistingPTags = /<p[\s>]/i.test(text)
+    // Check if content already has block-level HTML (from TipTap HTML)
+    // This includes <p>, <ul>, <ol>, <li>, <div>, etc.
+    const hasBlockElements = /<(?:p|ul|ol|li|div)[\s>]/i.test(text)
     
-    if (hasExistingPTags) {
-      // Content already has paragraph structure - clean and style it
+    if (hasBlockElements) {
+      // Content already has block structure - clean and style it
       // This handles TipTap output that's already HTML formatted
       return text
         // Add styling to existing <p> tags (handle both <p> and <p ...>)
         .replace(/<p(\s[^>]*)?>/gi, '<p style="margin: 0 0 16px 0; line-height: 1.6; text-align: justify; text-justify: inter-word;">')
+        // Add styling to <ul> lists
+        .replace(/<ul(\s[^>]*)?>/gi, '<ul style="margin: 0 0 16px 0; padding-left: 24px; list-style-type: disc;">')
+        // Add styling to <ol> lists
+        .replace(/<ol(\s[^>]*)?>/gi, '<ol style="margin: 0 0 16px 0; padding-left: 24px; list-style-type: decimal;">')
+        // Add styling to <li> items
+        .replace(/<li(\s[^>]*)?>/gi, '<li style="margin: 0 0 8px 0; line-height: 1.6;">')
         // Remove empty paragraphs
         .replace(/<p[^>]*>\s*<\/p>/gi, '')
         // Ensure links have proper styling
