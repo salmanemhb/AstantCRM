@@ -378,6 +378,36 @@ function buildHtmlEmail(body: any, contact: any, senderId: string, banner?: Emai
   // Get banner HTML if enabled
   const bannerHtml = banner ? getBannerHtml(banner) : ''
   
+  // Helper to remove duplicate greeting from context_p1 if it matches the greeting field
+  // This fixes the issue where pasted templates have greeting in both fields
+  const stripDuplicateGreeting = (text: string, greeting: string): string => {
+    if (!text || !greeting) return text
+    
+    // Normalize for comparison (strip HTML, lowercase, trim)
+    const normalizeForCompare = (s: string) => s.replace(/<[^>]+>/g, '').toLowerCase().trim()
+    const greetingNorm = normalizeForCompare(greeting)
+    
+    // Check if text starts with a greeting-like pattern
+    const greetingPatterns = [
+      /^<p[^>]*>.*?(good morning|good afternoon|good evening|hello|hi|dear)\s+[^,<]+,?\s*<\/p>/i,
+      /^(good morning|good afternoon|good evening|hello|hi|dear)\s+[^,\n]+,?\s*\n*/i,
+    ]
+    
+    for (const pattern of greetingPatterns) {
+      const match = text.match(pattern)
+      if (match) {
+        const matchedGreeting = normalizeForCompare(match[0])
+        // If the matched greeting is similar to the actual greeting, strip it
+        if (matchedGreeting.includes(greetingNorm.slice(0, 15)) || 
+            greetingNorm.includes(matchedGreeting.slice(0, 15))) {
+          return text.slice(match[0].length).trim()
+        }
+      }
+    }
+    
+    return text
+  }
+  
   // Convert text to HTML paragraphs
   // IMPORTANT: Preserve allowed formatting tags (<strong>, <em>, <a>) while escaping dangerous content
   const formatParagraph = (text: string) => {
@@ -493,7 +523,7 @@ function buildHtmlEmail(body: any, contact: any, senderId: string, banner?: Emai
       <td style="padding: 30px 20px; text-align: justify;">
         <!-- Email Body -->
         ${formatParagraph(body.greeting || `Good morning ${firstName},`)}
-        ${formatParagraph(body.context_p1 || '')}
+        ${formatParagraph(stripDuplicateGreeting(body.context_p1 || '', body.greeting))}
         ${formatParagraph(body.value_p2 || '')}
         ${formatParagraph(body.cta || '')}
         
@@ -556,10 +586,28 @@ ${sender.email}
 ${COMPANY_INFO.website}
 ` : body.signature || ''
 
+  // Helper to strip duplicate greeting from context_p1
+  const stripDuplicateGreetingText = (text: string, greeting: string): string => {
+    if (!text || !greeting) return text
+    const greetingClean = stripHtml(greeting).toLowerCase().trim()
+    const textClean = stripHtml(text)
+    const textLower = textClean.toLowerCase()
+    
+    // Check if text starts with same greeting pattern
+    if (textLower.startsWith(greetingClean.slice(0, Math.min(15, greetingClean.length)))) {
+      // Find where the first paragraph ends
+      const firstNewline = textClean.indexOf('\n\n')
+      if (firstNewline > 0) {
+        return textClean.slice(firstNewline + 2).trim()
+      }
+    }
+    return textClean
+  }
+
   return [
     stripHtml(body.greeting),
     '',
-    stripHtml(body.context_p1),
+    stripDuplicateGreetingText(body.context_p1, body.greeting),
     '',
     stripHtml(body.value_p2),
     '',
