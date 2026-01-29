@@ -433,6 +433,53 @@ export async function POST(request: NextRequest) {
       boldedCta = convertMarkdownBold(cta)
     }
     
+    // SAFEGUARD: Ensure greeting is not duplicated in context_p1
+    // This can happen if the template parsing misses the separation
+    if (boldedGreeting && boldedContext) {
+      const normalizeForComparison = (s: string): string => 
+        s.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').replace(/[,\s]+$/, '').trim().toLowerCase()
+      
+      const greetingNorm = normalizeForComparison(boldedGreeting)
+      const contextNorm = normalizeForComparison(boldedContext)
+      
+      if (contextNorm.startsWith(greetingNorm) && greetingNorm.length > 5) {
+        console.log('[GENERATE-CLAUDE] WARNING: Greeting found at start of context_p1, stripping...')
+        console.log('[GENERATE-CLAUDE] Greeting:', greetingNorm)
+        console.log('[GENERATE-CLAUDE] Context starts with:', contextNorm.substring(0, greetingNorm.length + 20))
+        
+        // Strip the greeting from context_p1
+        // Find where the greeting ends in the original HTML
+        const greetingWords = greetingNorm.split(/\s+/)
+        let foundEnd = 0
+        let wordIndex = 0
+        const tempContent = boldedContext
+        
+        for (let i = 0; i < tempContent.length && wordIndex < greetingWords.length; i++) {
+          // Skip HTML tags
+          if (tempContent[i] === '<') {
+            while (i < tempContent.length && tempContent[i] !== '>') i++
+            continue
+          }
+          // Skip whitespace and punctuation
+          if (/[\s,]/.test(tempContent[i])) continue
+          
+          // Check if we're at the start of the next greeting word
+          const remaining = tempContent.substring(i).toLowerCase()
+          if (remaining.startsWith(greetingWords[wordIndex])) {
+            i += greetingWords[wordIndex].length - 1
+            wordIndex++
+            foundEnd = i + 1
+          }
+        }
+        
+        // Skip any trailing comma, whitespace, or newlines
+        while (foundEnd < tempContent.length && /[\s,\n]/.test(tempContent[foundEnd])) foundEnd++
+        
+        boldedContext = tempContent.substring(foundEnd).trim()
+        console.log('[GENERATE-CLAUDE] Stripped context_p1 now starts with:', boldedContext.substring(0, 50))
+      }
+    }
+    
     const emailBody = {
       greeting: boldedGreeting,
       context_p1: boldedContext,

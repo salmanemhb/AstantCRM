@@ -665,10 +665,58 @@ export default function GmailEmailComposer({
         .join('')
     }
     
+    // Helper to strip greeting from context_p1 if it's duplicated there
+    const stripGreetingFromContext = (context: string, greeting: string): string => {
+      if (!context || !greeting) return context
+      
+      const normalize = (s: string): string => 
+        s.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').replace(/[,\s]+$/, '').trim().toLowerCase()
+      
+      const greetingNorm = normalize(greeting)
+      const contextNorm = normalize(context)
+      
+      if (contextNorm.startsWith(greetingNorm) && greetingNorm.length > 5) {
+        console.log('[getEmailBodyHtml] Stripping greeting from context_p1 before loading into editor')
+        // Find where greeting ends in the HTML
+        const greetingWords = greetingNorm.split(/\s+/)
+        let foundEnd = 0
+        let wordIndex = 0
+        
+        for (let i = 0; i < context.length && wordIndex < greetingWords.length; i++) {
+          if (context[i] === '<') {
+            while (i < context.length && context[i] !== '>') i++
+            continue
+          }
+          if (/[\s,]/.test(context[i])) continue
+          
+          const remaining = context.substring(i).toLowerCase()
+          if (remaining.startsWith(greetingWords[wordIndex])) {
+            i += greetingWords[wordIndex].length - 1
+            wordIndex++
+            foundEnd = i + 1
+          }
+        }
+        
+        while (foundEnd < context.length && /[\s,]/.test(context[foundEnd])) foundEnd++
+        
+        // If context_p1 is wrapped in <p> tags, handle that
+        let cleaned = context.substring(foundEnd).trim()
+        // Remove leading </p> if the greeting was in a <p> tag
+        cleaned = cleaned.replace(/^<\/p>\s*/i, '')
+        // Remove empty leading <p> tags
+        cleaned = cleaned.replace(/^<p[^>]*>\s*<\/p>\s*/gi, '')
+        return cleaned
+      }
+      return context
+    }
+    
     // NOTE: greeting is handled separately in the UI, NOT in the editor
     // This prevents duplication when sender changes
+    // Also strip any greeting that might be duplicated in context_p1
+    const cleanedContext = stripGreetingFromContext(body.context_p1 || '', body.greeting || '')
+    
     const parts = [
-      body.context_p1,
+      cleanedContext,
       body.value_p2,
       body.cta
     ].filter(Boolean)
@@ -770,6 +818,54 @@ export default function GmailEmailComposer({
       // Get original body to preserve greeting (which is displayed separately, not in editor)
       const originalBody = email.current_body || email.original_body || {}
       
+      // SAFEGUARD: Strip greeting from first paragraph if it duplicates the stored greeting
+      // This can happen if the database already had greeting embedded in context_p1
+      const stripGreetingFromParagraph = (paragraph: string, greeting: string): string => {
+        if (!paragraph || !greeting) return paragraph
+        
+        // Normalize for comparison
+        const normalize = (s: string): string => 
+          s.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').replace(/[,\s]+$/, '').trim().toLowerCase()
+        
+        const greetingNorm = normalize(greeting)
+        const paragraphNorm = normalize(paragraph)
+        
+        if (paragraphNorm.startsWith(greetingNorm) && greetingNorm.length > 5) {
+          console.log('[handleSave] Stripping duplicate greeting from first paragraph')
+          // Find where to cut in the original HTML
+          const greetingWords = greetingNorm.split(/\s+/)
+          let foundEnd = 0
+          let wordIndex = 0
+          
+          for (let i = 0; i < paragraph.length && wordIndex < greetingWords.length; i++) {
+            // Skip HTML tags
+            if (paragraph[i] === '<') {
+              while (i < paragraph.length && paragraph[i] !== '>') i++
+              continue
+            }
+            // Skip whitespace and punctuation
+            if (/[\s,]/.test(paragraph[i])) continue
+            
+            // Check if we're at the next greeting word
+            const remaining = paragraph.substring(i).toLowerCase()
+            if (remaining.startsWith(greetingWords[wordIndex])) {
+              i += greetingWords[wordIndex].length - 1
+              wordIndex++
+              foundEnd = i + 1
+            }
+          }
+          
+          // Skip trailing comma, whitespace
+          while (foundEnd < paragraph.length && /[\s,]/.test(paragraph[foundEnd])) foundEnd++
+          
+          return paragraph.substring(foundEnd).trim()
+        }
+        return paragraph
+      }
+      
+      // Clean the first paragraph if needed
+      const cleanedFirstParagraph = stripGreetingFromParagraph(paragraphs[0] || '', originalBody.greeting || '')
+      
       // Editor now contains: context_p1, value_p2, cta (greeting is separate)
       // Map paragraphs to these 3 fields
       let updatedBody: EmailJsonBody
@@ -778,7 +874,7 @@ export default function GmailEmailComposer({
         // Standard 3+ paragraph structure (context_p1, value_p2, cta)
         updatedBody = {
           greeting: originalBody.greeting || '', // Preserve greeting from original
-          context_p1: paragraphs[0] || '',
+          context_p1: cleanedFirstParagraph,
           value_p2: paragraphs[1] || '',
           cta: paragraphs.slice(2).join('\n\n') || '',
           signature: getSignatureText(signatureMemberId),
@@ -789,7 +885,7 @@ export default function GmailEmailComposer({
         // 2 paragraphs: context_p1 and cta
         updatedBody = {
           greeting: originalBody.greeting || '',
-          context_p1: paragraphs[0] || '',
+          context_p1: cleanedFirstParagraph,
           value_p2: '', // Empty
           cta: paragraphs[1] || '',
           signature: getSignatureText(signatureMemberId),
@@ -800,7 +896,7 @@ export default function GmailEmailComposer({
         // 1 or 0 paragraphs - preserve original body fields
         updatedBody = {
           greeting: originalBody.greeting || '',
-          context_p1: paragraphs[0] || originalBody.context_p1 || '',
+          context_p1: cleanedFirstParagraph || originalBody.context_p1 || '',
           value_p2: originalBody.value_p2 || '',
           cta: originalBody.cta || '',
           signature: getSignatureText(signatureMemberId),

@@ -381,56 +381,92 @@ function buildHtmlEmail(body: any, contact: any, senderId: string, banner?: Emai
   // Helper to remove duplicate greeting from context_p1 if it matches the greeting field
   // This fixes the issue where pasted templates have greeting in both fields
   const stripDuplicateGreeting = (text: string, greeting: string): string => {
-    if (!text) return text
+    if (!text || !greeting) return text
     
-    console.log('[stripDuplicateGreeting] Input text (first 150):', JSON.stringify(text.substring(0, 150)))
+    console.log('[stripDuplicateGreeting] === STARTING GREETING STRIP ===')
+    console.log('[stripDuplicateGreeting] Input text (first 200):', JSON.stringify(text.substring(0, 200)))
     console.log('[stripDuplicateGreeting] Greeting:', JSON.stringify(greeting))
     
-    // If we have a greeting already, strip ANY greeting pattern from start of context_p1
-    if (greeting) {
-      let cleaned = text
-      
-      // Pattern 1: Greeting in a paragraph tag - very flexible
-      // Matches: <p>Good morning Salmane ,</p> or <p style="...">Good morning Salmane,</p>
-      const p1 = /^<p[^>]*>[\s]*(good\s*morning|good\s*afternoon|good\s*evening|hello|hi|dear)[\s,]+[^<]*<\/p>[\s]*/i
-      if (p1.test(cleaned)) {
-        console.log('[stripDuplicateGreeting] Pattern 1 matched!')
-        cleaned = cleaned.replace(p1, '')
-      }
-      
-      // Pattern 2: Plain text greeting at start
-      // Matches: "Good morning Salmane ,\n" or "Good morning Salmane,"
-      const p2 = /^(good\s*morning|good\s*afternoon|good\s*evening|hello|hi|dear)[\s,]+[^\n<]+[\s,]*\n*/i
-      if (p2.test(cleaned)) {
-        console.log('[stripDuplicateGreeting] Pattern 2 matched!')
-        cleaned = cleaned.replace(p2, '')
-      }
-      
-      // Pattern 3: The greeting might be EXACTLY the same as body.greeting
-      // Strip it if text starts with the exact greeting text
-      const greetingText = greeting.replace(/<[^>]+>/g, '').trim()
-      if (cleaned.replace(/<[^>]+>/g, '').trim().startsWith(greetingText)) {
-        console.log('[stripDuplicateGreeting] Exact greeting match at start, stripping...')
-        // Find where the greeting ends and remove it
-        const greetingEndIndex = cleaned.indexOf(greetingText) + greetingText.length
-        // Also remove any trailing whitespace/newlines after the greeting
-        let afterGreeting = cleaned.substring(greetingEndIndex)
-        afterGreeting = afterGreeting.replace(/^[\s,]*\n*/, '')
-        // Handle case where greeting is in a <p> tag
-        if (cleaned.startsWith('<p')) {
-          afterGreeting = afterGreeting.replace(/^<\/p>\s*/, '')
-        }
-        cleaned = afterGreeting
-      }
-      
-      // Remove any empty paragraphs
-      cleaned = cleaned.replace(/^<p[^>]*>\s*<\/p>\s*/g, '')
-      
-      console.log('[stripDuplicateGreeting] Cleaned text (first 150):', JSON.stringify(cleaned.substring(0, 150)))
-      return cleaned.trim()
+    // Normalize function - strip HTML tags, extra spaces, and common punctuation variations
+    const normalize = (s: string): string => {
+      return s
+        .replace(/<[^>]+>/g, '') // Remove HTML tags
+        .replace(/&nbsp;/g, ' ') // Replace &nbsp; with space
+        .replace(/\s+/g, ' ')    // Collapse whitespace
+        .replace(/[,\s]+$/, '')  // Remove trailing comma and spaces
+        .trim()
+        .toLowerCase()
     }
     
-    return text
+    const greetingNorm = normalize(greeting)
+    console.log('[stripDuplicateGreeting] Normalized greeting:', JSON.stringify(greetingNorm))
+    
+    // Check if context_p1 starts with the greeting (plain text comparison)
+    const textNorm = normalize(text)
+    console.log('[stripDuplicateGreeting] Normalized text start:', JSON.stringify(textNorm.substring(0, 100)))
+    
+    if (!textNorm.startsWith(greetingNorm)) {
+      console.log('[stripDuplicateGreeting] No match - text does not start with greeting')
+      return text
+    }
+    
+    console.log('[stripDuplicateGreeting] MATCH FOUND - greeting is at start of context_p1!')
+    
+    // We need to remove the greeting from the original HTML
+    // Strategy: Find the first paragraph tag (or first sentence) and remove it
+    let cleaned = text
+    
+    // Case 1: Content starts with <p> tag containing the greeting
+    const pTagMatch = cleaned.match(/^<p[^>]*>([\s\S]*?)<\/p>\s*/i)
+    if (pTagMatch) {
+      const firstParagraphContent = pTagMatch[1]
+      const firstParagraphNorm = normalize(firstParagraphContent)
+      console.log('[stripDuplicateGreeting] First <p> content:', JSON.stringify(firstParagraphNorm))
+      
+      // If the first paragraph is the greeting, remove it entirely
+      if (firstParagraphNorm === greetingNorm || 
+          greetingNorm.startsWith(firstParagraphNorm) || 
+          firstParagraphNorm.startsWith(greetingNorm)) {
+        console.log('[stripDuplicateGreeting] Removing first <p> tag (contains greeting)')
+        cleaned = cleaned.substring(pTagMatch[0].length).trim()
+      }
+    }
+    
+    // Case 2: Plain text greeting at start (no <p> tag)
+    if (!pTagMatch) {
+      // Find where greeting ends in the original text
+      // Build a regex that matches the greeting words with possible HTML tags in between
+      const greetingWords = greetingNorm.split(/\s+/)
+      let regexStr = '^\\s*'
+      for (let i = 0; i < greetingWords.length; i++) {
+        // Escape special regex chars
+        const word = greetingWords[i].replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+        regexStr += word
+        if (i < greetingWords.length - 1) {
+          // Allow HTML tags and whitespace between words
+          regexStr += '(?:<[^>]*>|\\s|,)*'
+        }
+      }
+      regexStr += '[,\\s]*(?:\\n|<br\\s*/?>)*'
+      
+      const greetingRegex = new RegExp(regexStr, 'i')
+      console.log('[stripDuplicateGreeting] Trying regex:', regexStr.substring(0, 100))
+      
+      const match = cleaned.match(greetingRegex)
+      if (match) {
+        console.log('[stripDuplicateGreeting] Regex matched:', JSON.stringify(match[0].substring(0, 50)))
+        cleaned = cleaned.substring(match[0].length).trim()
+      }
+    }
+    
+    // Remove any remaining empty paragraphs at the start
+    cleaned = cleaned.replace(/^(?:<p[^>]*>\s*<\/p>\s*)+/gi, '')
+    
+    // Clean up leading whitespace/newlines
+    cleaned = cleaned.replace(/^[\s\n]+/, '')
+    
+    console.log('[stripDuplicateGreeting] Final cleaned text (first 200):', JSON.stringify(cleaned.substring(0, 200)))
+    return cleaned
   }
   
   // Convert text to HTML paragraphs
