@@ -345,11 +345,11 @@ export function getBannerHtml(banner: EmailBanner): string {
   
   // Optimal dimensions for email banners:
   // - Container: 600px (email standard)
-  // - Image display: 600px wide, ~120px height (5:1 ratio)
-  // - Actual image file: 1200x240 for retina (@2x)
+  // - Image display: 600px wide, height auto based on image ratio
+  // - Actual image file: 1200x525 for retina (@2x) - OpenMacro banner
   const containerWidth = 600
   const imageWidth = 600  // Full width of container for better mobile scaling
-  const imageHeight = 120 // 5:1 aspect ratio
+  const imageHeight = 262 // Matches OpenMacro banner ratio (1200x525 / 2)
   
   return `
 <!-- Email Header Banner -->
