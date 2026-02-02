@@ -314,7 +314,8 @@ export function formatEmailWithBolding(body: any, contact?: any): any {
 import { SUPABASE_PROJECT_ID } from './signatures'
 
 // Supabase-hosted banner URL (upload astant.jpg to Supabase storage)
-export const BANNER_URL = `https://${SUPABASE_PROJECT_ID}.supabase.co/storage/v1/object/public/public-assets/astant-banner.jpg`
+// Cache bust: v2 = OpenMacro banner 1200x525
+export const BANNER_URL = `https://${SUPABASE_PROJECT_ID}.supabase.co/storage/v1/object/public/public-assets/astant-banner.jpg?v=2`
 
 export interface EmailBanner {
   enabled: boolean
