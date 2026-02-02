@@ -11,9 +11,20 @@ const logger = createLogger('bulk-operations')
 
 // Helper to get the base URL for internal API calls
 function getBaseUrl(request: NextRequest): string {
-  // Try to get from request headers first (most reliable)
+  // For Netlify: Use the URL environment variable
+  if (process.env.URL) {
+    return process.env.URL
+  }
+  
+  // For Netlify deploy previews
+  if (process.env.DEPLOY_PRIME_URL) {
+    return process.env.DEPLOY_PRIME_URL
+  }
+  
+  // Try to get from request headers
   const host = request.headers.get('host')
-  const protocol = request.headers.get('x-forwarded-proto') || 'http'
+  const forwardedProto = request.headers.get('x-forwarded-proto')
+  const protocol = forwardedProto || (host?.includes('localhost') ? 'http' : 'https')
   
   if (host) {
     return `${protocol}://${host}`
@@ -25,7 +36,8 @@ function getBaseUrl(request: NextRequest): string {
 
 export async function POST(request: NextRequest) {
   const baseUrl = getBaseUrl(request)
-  logger.debug('Using base URL:', baseUrl)
+  // Log to console.error so it shows in Netlify logs (not just debug)
+  console.log('[BULK-OPS] Base URL for internal calls:', baseUrl)
   
   try {
     const body = await request.json()
@@ -169,12 +181,21 @@ export async function POST(request: NextRequest) {
         // Helper function with retry logic for rate limit errors
         const sendWithRetry = async (email: any, retryCount = 0): Promise<{ success: boolean; error?: string }> => {
           try {
-            logger.debug(`Sending email ${email.id} (attempt ${retryCount + 1})`)
+            logger.debug(`Sending email ${email.id} (attempt ${retryCount + 1}) to ${baseUrl}/api/send-email`)
             const response = await fetch(`${baseUrl}/api/send-email`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ email_id: email.id, dry_run: isDryRun }),
             })
+
+            // Check content-type before parsing as JSON
+            const contentType = response.headers.get('content-type')
+            if (!contentType || !contentType.includes('application/json')) {
+              // Got HTML or other non-JSON response (likely error page)
+              const textResponse = await response.text()
+              logger.error(`Non-JSON response for email ${email.id}: ${textResponse.substring(0, 200)}`)
+              return { success: false, error: `${email.id}: Server returned non-JSON response (status: ${response.status})` }
+            }
 
             if (response.ok) {
               return { success: true }
@@ -190,12 +211,12 @@ export async function POST(request: NextRequest) {
               return sendWithRetry(email, retryCount + 1)
             }
 
-            return { success: false, error: `${email.id}: ${errorData.error}` }
+            return { success: false, error: `${email.id}: ${errorData.error || 'Unknown error'}` }
           } catch (err: any) {
             // Network errors - also retry
             if (retryCount < MAX_RETRIES) {
               const retryDelay = RETRY_BASE_DELAY_MS * Math.pow(2, retryCount)
-              logger.warn(`Network error for email ${email.id}, retrying in ${retryDelay}ms`)
+              logger.warn(`Network error for email ${email.id}, retrying in ${retryDelay}ms: ${err.message}`)
               await new Promise(resolve => setTimeout(resolve, retryDelay))
               return sendWithRetry(email, retryCount + 1)
             }
