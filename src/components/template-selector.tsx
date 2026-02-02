@@ -21,6 +21,7 @@ import {
   X
 } from 'lucide-react'
 import RichTextEditor from './rich-text-editor'
+import { useToast } from './toast'
 import { 
   EMAIL_TEMPLATES, 
   TEMPLATE_CATEGORIES, 
@@ -58,6 +59,7 @@ interface TemplateSelectorProps {
 }
 
 export default function TemplateSelector({ onSelect, onClose }: TemplateSelectorProps) {
+  const { showToast } = useToast()
   const [searchQuery, setSearchQuery] = useState('')
   const [expandedCategory, setExpandedCategory] = useState<TemplateCategory | 'custom' | null>('investor')
   const [selectedTemplate, setSelectedTemplate] = useState<EmailTemplate | null>(null)
@@ -158,7 +160,7 @@ export default function TemplateSelector({ onSelect, onClose }: TemplateSelector
       }
     } catch (error) {
       console.error('Failed to delete template:', error)
-      alert('Failed to delete template')
+      showToast('Failed to delete template', 'error')
     }
   }
 

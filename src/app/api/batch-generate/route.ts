@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { TEAM_MEMBERS } from '@/lib/signatures'
+import { createLogger } from '@/lib/logger'
+
+const logger = createLogger('batch-generate')
 
 // Valid sender IDs for validation
 const VALID_SENDER_IDS = new Set(TEAM_MEMBERS.map(m => m.id))
@@ -9,7 +12,7 @@ const VALID_SENDER_IDS = new Set(TEAM_MEMBERS.map(m => m.id))
 const MAX_BATCH_SIZE = 100
 
 export async function POST(request: NextRequest) {
-  console.log('[BATCH-GENERATE] Starting batch generation...')
+  logger.info('Starting batch generation...')
   
   try {
     const { 
@@ -55,7 +58,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    console.log('[BATCH-GENERATE] Processing', contact_ids.length, 'contacts for campaign', campaign_id)
+    logger.info('Processing', contact_ids.length, 'contacts for campaign', campaign_id)
 
     const results = {
       success: [] as string[],
@@ -88,27 +91,27 @@ export async function POST(request: NextRequest) {
 
         if (response.ok && data.email_id) {
           results.success.push(contact_id)
-          console.log('[BATCH-GENERATE] Generated email for contact:', contact_id)
+          logger.debug('Generated email for contact:', contact_id)
         } else {
           results.failed.push({ 
             contact_id, 
             error: data.error || 'Unknown error' 
           })
-          console.error('[BATCH-GENERATE] Failed for contact:', contact_id, data.error)
+          logger.error('Failed for contact:', contact_id, data.error)
         }
       } catch (error: any) {
         results.failed.push({ 
           contact_id, 
           error: error.message || 'Request failed' 
         })
-        console.error('[BATCH-GENERATE] Error for contact:', contact_id, error)
+        logger.error('Error for contact:', contact_id, error)
       }
 
       // Small delay to avoid rate limiting
       await new Promise(resolve => setTimeout(resolve, 100))
     }
 
-    console.log('[BATCH-GENERATE] Completed:', {
+    logger.info('Completed:', {
       success: results.success.length,
       failed: results.failed.length,
       skipped: results.skipped.length,
@@ -125,7 +128,7 @@ export async function POST(request: NextRequest) {
       },
     })
   } catch (error: any) {
-    console.error('[BATCH-GENERATE] Fatal error:', error)
+    logger.error('Fatal error:', error)
     return NextResponse.json(
       { success: false, error: error.message || 'Internal server error' },
       { status: 500 }

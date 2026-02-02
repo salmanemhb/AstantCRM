@@ -5,6 +5,9 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { createLogger } from '@/lib/logger'
+
+const logger = createLogger('bulk-operations')
 
 // Helper to get the base URL for internal API calls
 function getBaseUrl(request: NextRequest): string {
@@ -22,7 +25,7 @@ function getBaseUrl(request: NextRequest): string {
 
 export async function POST(request: NextRequest) {
   const baseUrl = getBaseUrl(request)
-  console.log('[BULK-OPS] Using base URL:', baseUrl)
+  logger.debug('Using base URL:', baseUrl)
   
   try {
     const body = await request.json()
@@ -144,7 +147,8 @@ export async function POST(request: NextRequest) {
 
       // ============================================
       // SEND ALL APPROVED (supports dry_run)
-      // Optimized for sending 500+ emails efficiently
+      // Sequential sending with rate limiting for Resend API
+      // Resend limit: 2 requests/second (free tier)
       // ============================================
       case 'send_dry_run':
       case 'send_approved': {
@@ -155,52 +159,78 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ message: 'No approved emails to send', result: { ...result, total: 0 } })
         }
 
-        // Process in batches for better performance
-        // Resend allows ~10 emails/second, so we batch 10 at a time with 1.1s delay
-        const BATCH_SIZE = 10
-        const BATCH_DELAY_MS = 1100
+        // RATE LIMITING CONFIGURATION
+        // Resend free tier: 2 requests/second
+        // We send at ~1.5 req/sec to stay safely under the limit
+        const DELAY_BETWEEN_EMAILS_MS = 700  // 700ms = ~1.4 emails/sec (safely under 2/sec)
+        const MAX_RETRIES = 3
+        const RETRY_BASE_DELAY_MS = 2000  // Start with 2s, exponential backoff
 
-        for (let i = 0; i < approvedEmails.length; i += BATCH_SIZE) {
-          const batch = approvedEmails.slice(i, i + BATCH_SIZE)
-          
-          // Send batch in parallel
-          const batchResults = await Promise.all(
-            batch.map(async (email) => {
-              try {
-                console.log(`[BULK-OPS] Sending email ${email.id} via ${baseUrl}/api/send-email`)
-                const response = await fetch(`${baseUrl}/api/send-email`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ email_id: email.id, dry_run: isDryRun }),
-                })
-
-                if (response.ok) {
-                  return { success: true }
-                } else {
-                  const errorData = await response.json()
-                  return { success: false, error: `${email.id}: ${errorData.error}` }
-                }
-              } catch (err: any) {
-                return { success: false, error: `${email.id}: ${err.message}` }
-              }
+        // Helper function with retry logic for rate limit errors
+        const sendWithRetry = async (email: any, retryCount = 0): Promise<{ success: boolean; error?: string }> => {
+          try {
+            logger.debug(`Sending email ${email.id} (attempt ${retryCount + 1})`)
+            const response = await fetch(`${baseUrl}/api/send-email`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ email_id: email.id, dry_run: isDryRun }),
             })
-          )
 
-          // Aggregate results
-          for (const r of batchResults) {
-            if (r.success) {
-              result.success++
-            } else {
-              result.failed++
-              if (r.error) result.errors.push(r.error)
+            if (response.ok) {
+              return { success: true }
             }
-          }
 
-          // Rate limit between batches (not after last batch)
-          if (i + BATCH_SIZE < approvedEmails.length) {
-            await new Promise(resolve => setTimeout(resolve, BATCH_DELAY_MS))
+            const errorData = await response.json()
+            
+            // Check if it's a rate limit error - retry with exponential backoff
+            if (response.status === 429 && retryCount < MAX_RETRIES) {
+              const retryDelay = RETRY_BASE_DELAY_MS * Math.pow(2, retryCount)  // 2s, 4s, 8s
+              logger.warn(`Rate limited for email ${email.id}, retrying in ${retryDelay}ms (attempt ${retryCount + 1}/${MAX_RETRIES})`)
+              await new Promise(resolve => setTimeout(resolve, retryDelay))
+              return sendWithRetry(email, retryCount + 1)
+            }
+
+            return { success: false, error: `${email.id}: ${errorData.error}` }
+          } catch (err: any) {
+            // Network errors - also retry
+            if (retryCount < MAX_RETRIES) {
+              const retryDelay = RETRY_BASE_DELAY_MS * Math.pow(2, retryCount)
+              logger.warn(`Network error for email ${email.id}, retrying in ${retryDelay}ms`)
+              await new Promise(resolve => setTimeout(resolve, retryDelay))
+              return sendWithRetry(email, retryCount + 1)
+            }
+            return { success: false, error: `${email.id}: ${err.message}` }
           }
         }
+
+        // Send emails SEQUENTIALLY with delay between each
+        // This prevents rate limiting issues entirely
+        logger.info(`Starting sequential send of ${approvedEmails.length} emails at ~1.4/sec rate`)
+        
+        for (let i = 0; i < approvedEmails.length; i++) {
+          const email = approvedEmails[i]
+          
+          const sendResult = await sendWithRetry(email)
+          
+          if (sendResult.success) {
+            result.success++
+          } else {
+            result.failed++
+            if (sendResult.error) result.errors.push(sendResult.error)
+          }
+
+          // Log progress every 10 emails
+          if ((i + 1) % 10 === 0) {
+            logger.info(`Progress: ${i + 1}/${approvedEmails.length} emails processed (${result.success} success, ${result.failed} failed)`)
+          }
+
+          // Add delay between emails (not after the last one)
+          if (i < approvedEmails.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_EMAILS_MS))
+          }
+        }
+
+        logger.info(`Completed: ${result.success} sent, ${result.failed} failed out of ${approvedEmails.length} total`)
         
         result.total = approvedEmails.length
         if (isDryRun) {
@@ -293,7 +323,7 @@ export async function POST(request: NextRequest) {
       result,
     })
   } catch (error: any) {
-    console.error('Bulk operation error:', error)
+    logger.error('Bulk operation error:', error)
     return NextResponse.json(
       { error: error.message || 'Bulk operation failed' },
       { status: 500 }

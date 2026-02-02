@@ -1,6 +1,8 @@
 import type { Metadata } from 'next'
 import { Inter } from 'next/font/google'
 import './globals.css'
+import { PageErrorBoundary } from '@/components/error-boundary'
+import { ToastProvider } from '@/components/toast'
 
 const inter = Inter({ subsets: ['latin'] })
 
@@ -22,9 +24,13 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={inter.className}>
-        <div className="min-h-screen bg-gray-50">
-          {children}
-        </div>
+        <PageErrorBoundary>
+          <ToastProvider>
+            <div className="min-h-screen bg-gray-50">
+              {children}
+            </div>
+          </ToastProvider>
+        </PageErrorBoundary>
       </body>
     </html>
   )

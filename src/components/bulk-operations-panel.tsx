@@ -18,6 +18,7 @@ import {
   Sparkles,
   PlayCircle,
 } from 'lucide-react'
+import { BulkProgressModal, ConfirmDialog, useToast } from './toast'
 
 interface BulkOperationsPanelProps {
   campaignId: string
@@ -44,6 +45,7 @@ export default function BulkOperationsPanel({
   stats,
   onRefresh,
 }: BulkOperationsPanelProps) {
+  const { showToast } = useToast()
   const [isExpanded, setIsExpanded] = useState(true)
   const [loading, setLoading] = useState<string | null>(null)
   const [result, setResult] = useState<{
@@ -54,6 +56,38 @@ export default function BulkOperationsPanel({
     dry_run?: boolean
     message?: string
   } | null>(null)
+  
+  // Progress modal state
+  const [progressModal, setProgressModal] = useState<{
+    isOpen: boolean
+    title: string
+    current: number
+    total: number
+    status: 'running' | 'success' | 'error' | 'cancelled'
+    errors: string[]
+  }>({
+    isOpen: false,
+    title: '',
+    current: 0,
+    total: 0,
+    status: 'running',
+    errors: []
+  })
+  
+  // Confirm dialog state
+  const [confirmDialog, setConfirmDialog] = useState<{
+    isOpen: boolean
+    title: string
+    message: string
+    onConfirm: () => void
+    variant: 'danger' | 'warning' | 'default'
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    onConfirm: () => {},
+    variant: 'default'
+  })
 
   interface OperationOptions {
     filter?: 'green' | 'yellow' | 'red' | 'all'
@@ -64,6 +98,20 @@ export default function BulkOperationsPanel({
   const executeOperation = async (operation: string, options: OperationOptions = {}) => {
     setLoading(operation)
     setResult(null)
+
+    // For send operations, show progress modal
+    const isSendOperation = operation.includes('send') && !options.dry_run
+    
+    if (isSendOperation) {
+      setProgressModal({
+        isOpen: true,
+        title: 'Sending Emails',
+        current: 0,
+        total: stats.ready_to_send,
+        status: 'running',
+        errors: []
+      })
+    }
 
     try {
       const response = await fetch('/api/bulk-operations', {
@@ -80,15 +128,55 @@ export default function BulkOperationsPanel({
 
       if (data.success) {
         setResult(data.result)
+        
+        if (isSendOperation) {
+          setProgressModal(prev => ({
+            ...prev,
+            current: data.result.success,
+            status: data.result.failed > 0 ? 'error' : 'success',
+            errors: data.result.errors || []
+          }))
+        }
+        
         onRefresh()
       } else {
-        alert(`Error: ${data.error}`)
+        if (isSendOperation) {
+          setProgressModal(prev => ({
+            ...prev,
+            status: 'error',
+            errors: [data.error]
+          }))
+        } else {
+          showToast(`Error: ${data.error}`, 'error')
+        }
       }
     } catch (err: any) {
-      alert(`Error: ${err.message}`)
+      if (isSendOperation) {
+        setProgressModal(prev => ({
+          ...prev,
+          status: 'error',
+          errors: [err.message]
+        }))
+      } else {
+        showToast(`Error: ${err.message}`, 'error')
+      }
     } finally {
       setLoading(null)
     }
+  }
+  
+  // Wrapper for send operations that require confirmation
+  const confirmAndExecute = (operation: string, title: string, message: string, options: OperationOptions = {}) => {
+    setConfirmDialog({
+      isOpen: true,
+      title,
+      message,
+      variant: operation.includes('send') ? 'warning' : 'default',
+      onConfirm: () => {
+        setConfirmDialog(prev => ({ ...prev, isOpen: false }))
+        executeOperation(operation, options)
+      }
+    })
   }
 
   return (
@@ -211,11 +299,11 @@ export default function BulkOperationsPanel({
 
             {/* Send All Approved */}
             <button
-              onClick={() => {
-                if (confirm(`Send ${stats.ready_to_send} emails now?`)) {
-                  executeOperation('send_approved')
-                }
-              }}
+              onClick={() => confirmAndExecute(
+                'send_approved',
+                'Send All Approved Emails?',
+                `You are about to send ${stats.ready_to_send} emails. This action cannot be undone.`
+              )}
               disabled={loading !== null || stats.ready_to_send === 0}
               className="flex items-center justify-center space-x-2 px-4 py-3 bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
@@ -281,6 +369,29 @@ export default function BulkOperationsPanel({
           )}
         </div>
       )}
+      
+      {/* Confirm Dialog */}
+      <ConfirmDialog
+        isOpen={confirmDialog.isOpen}
+        onClose={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
+        onConfirm={confirmDialog.onConfirm}
+        title={confirmDialog.title}
+        message={confirmDialog.message}
+        confirmText="Send Emails"
+        cancelText="Cancel"
+        variant={confirmDialog.variant}
+      />
+      
+      {/* Progress Modal */}
+      <BulkProgressModal
+        isOpen={progressModal.isOpen}
+        title={progressModal.title}
+        current={progressModal.current}
+        total={progressModal.total}
+        status={progressModal.status}
+        errors={progressModal.errors}
+        onClose={() => setProgressModal(prev => ({ ...prev, isOpen: false }))}
+      />
     </div>
   )
 }
@@ -306,6 +417,7 @@ export function BatchGenerationModal({
   totalPending,
   onComplete,
 }: BatchGenerationModalProps) {
+  const { showToast } = useToast()
   const [isGenerating, setIsGenerating] = useState(false)
   const [progress, setProgress] = useState({ current: 0, total: 0 })
   const [result, setResult] = useState<any>(null)
@@ -342,10 +454,10 @@ export function BatchGenerationModal({
         setResult(data.result)
         onComplete()
       } else {
-        alert(`Error: ${data.error}`)
+        showToast(`Error: ${data.error}`, 'error')
       }
     } catch (err: any) {
-      alert(`Error: ${err.message}`)
+      showToast(`Error: ${err.message}`, 'error')
     } finally {
       setIsGenerating(false)
     }

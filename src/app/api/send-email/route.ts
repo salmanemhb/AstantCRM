@@ -3,11 +3,25 @@ import { createClient } from '@/lib/supabase/server'
 import { Resend } from 'resend'
 import { TEAM_MEMBERS, COMPANY_INFO, getSignatureHtml, getMemberById } from '@/lib/signatures'
 import { getBannerHtml, type EmailBanner, DEFAULT_BANNER } from '@/lib/email-formatting'
+import { EMAIL_CONFIG, getCCEmails, API_CONFIG } from '@/lib/config'
+import { isValidEmail, escapeHtml, validateEmailForSend } from '@/lib/validation'
+import { 
+  stripDuplicateGreeting, 
+  isGreetingParagraph, 
+  extractGreetingFromHtml,
+  hasBlockElements,
+  applyEmailStyles,
+  stripHtml,
+  normalizeForComparison
+} from '@/lib/email-utils'
+import { createLogger } from '@/lib/logger'
 
 // ============================================
 // EMAIL SENDING API
 // Single + Bulk email sending with rate limiting
 // ============================================
+
+const logger = createLogger('send-email')
 
 // Initialize Resend
 const resend = process.env.RESEND_API_KEY 
@@ -15,34 +29,13 @@ const resend = process.env.RESEND_API_KEY
   : null
 
 // Default sender for broadcasts/general emails
-const FROM_DOMAIN = process.env.FROM_DOMAIN || 'astantglobal.com'
+const FROM_DOMAIN = EMAIL_CONFIG.fromDomain
 const DEFAULT_FROM_EMAIL = `info@${FROM_DOMAIN}`
 const DEFAULT_FROM_NAME = COMPANY_INFO.name
 
-// CC emails - all replies will be visible to these addresses
-// Add team members who should be copied on all outgoing emails
-const CC_EMAILS = [
-  'jean.francois@astantglobal.com',
-  'marcos.agustin@astantglobal.com',
-  'salman@astantglobal.com',
-  'miguel.eugene@astantglobal.com',
-  'ana.birkenfeld@astantglobal.com',
-]
-
-// Rate limiting for bulk: 10 emails/second
-const BATCH_SIZE = 10
-const BATCH_DELAY_MS = 1100
-
-// HTML escape function to prevent XSS
-function escapeHtml(text: string): string {
-  if (!text) return ''
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;')
-}
+// Rate limiting for bulk - from config
+const BATCH_SIZE = EMAIL_CONFIG.rateLimit.batchSize
+const BATCH_DELAY_MS = EMAIL_CONFIG.rateLimit.batchDelayMs
 
 // Get sender info from team members
 function getSenderFromId(senderId: string): { name: string; email: string; replyTo?: string } {
@@ -69,23 +62,23 @@ interface BulkSendRequest {
 }
 
 export async function POST(request: NextRequest) {
-  console.log('[SEND-EMAIL] === POST Request Started ===')
+  logger.info('=== POST Request Started ===')
   try {
     const reqBody = await request.json()
-    console.log('[SEND-EMAIL] Request body:', JSON.stringify(reqBody, null, 2))
+    logger.info('Request body:', JSON.stringify(reqBody, null, 2))
     
     // Check if this is a bulk operation
     if (reqBody.action === 'bulk') {
-      console.log('[SEND-EMAIL] Handling bulk send operation')
+      logger.info('Handling bulk send operation')
       return handleBulkSend(reqBody as BulkSendRequest)
     }
     
     // Single email send
     const { email_id, dry_run = false } = reqBody as SendEmailRequest
-    console.log('[SEND-EMAIL] Single email send:', { email_id, dry_run })
+    logger.info('Single email send:', { email_id, dry_run })
 
     if (!email_id) {
-      console.error('[SEND-EMAIL] Missing email_id')
+      logger.error('Missing email_id')
       return NextResponse.json(
         { success: false, error: 'email_id is required' },
         { status: 400 }
@@ -93,7 +86,7 @@ export async function POST(request: NextRequest) {
     }
 
     const supabase = createClient()
-    console.log('[SEND-EMAIL] Fetching email data...')
+    logger.info('Fetching email data...')
 
     // Fetch email with related data
     const { data: email, error: emailError } = await supabase
@@ -110,17 +103,17 @@ export async function POST(request: NextRequest) {
       .single()
 
     if (emailError || !email) {
-      console.error('[SEND-EMAIL] Email not found:', emailError)
+      logger.error('Email not found:', emailError)
       return NextResponse.json(
         { success: false, error: 'Email not found' },
         { status: 404 }
       )
     }
-    console.log('[SEND-EMAIL] Email found:', { id: email.id, subject: email.subject })
+    logger.info('Email found:', { id: email.id, subject: email.subject })
 
     // Check if already sent
     if (email.sent_at) {
-      console.warn('[SEND-EMAIL] Email already sent at:', email.sent_at)
+      logger.warn('Email already sent at:', email.sent_at)
       return NextResponse.json(
         { success: false, error: 'Email already sent' },
         { status: 400 }
@@ -130,34 +123,63 @@ export async function POST(request: NextRequest) {
     const contact = email.contact_campaign?.contact
     const campaign = email.contact_campaign?.campaign
     const toEmail = contact?.email
-    console.log('[SEND-EMAIL] Recipient:', { contactId: contact?.id, toEmail, campaignId: campaign?.id })
+    logger.info('Recipient:', { contactId: contact?.id, toEmail, campaignId: campaign?.id })
 
     if (!toEmail) {
-      console.error('[SEND-EMAIL] No recipient email address found')
+      logger.error('No recipient email address found')
       return NextResponse.json(
         { success: false, error: 'No recipient email address' },
         { status: 400 }
       )
     }
 
+    // Validate recipient email format
+    if (!isValidEmail(toEmail)) {
+      logger.error('Invalid recipient email format:', toEmail)
+      return NextResponse.json(
+        { success: false, error: `Invalid recipient email format: ${toEmail}` },
+        { status: 400 }
+      )
+    }
+
+    // Validate email content before sending
+    const emailBody = email.current_body || email.original_body
+    const validation = validateEmailForSend({
+      to: toEmail,
+      subject: email.subject,
+      body: emailBody
+    })
+
+    if (!validation.isValid) {
+      logger.warn('Email validation failed:', validation)
+      // Log warnings but don't block if only warnings
+      if (validation.errors.length > 0) {
+        return NextResponse.json(
+          { success: false, error: 'Email validation failed', details: validation.errors },
+          { status: 400 }
+        )
+      }
+      // If only warnings, log and continue
+      logger.info('Proceeding with warnings:', validation.warnings)
+    }
     // Get sender from contact_campaign or campaign
     // PRIORITY: 1) signatureMemberId in email body (most recently selected), 
     //           2) contact_campaign.sender_id, 
     //           3) campaign.sender_id, 
     //           4) default
-    const emailBody = email.current_body || email.original_body
+    // emailBody already defined above for validation
     
-    console.log('[SEND-EMAIL] ========== EMAIL BODY FROM DATABASE ==========')
-    console.log('[SEND-EMAIL] emailBody.greeting:', JSON.stringify(emailBody?.greeting?.substring(0, 100)))
-    console.log('[SEND-EMAIL] emailBody.context_p1 (first 200):', JSON.stringify(emailBody?.context_p1?.substring(0, 200)))
-    console.log('[SEND-EMAIL] emailBody.value_p2 (first 100):', JSON.stringify(emailBody?.value_p2?.substring(0, 100)))
-    console.log('[SEND-EMAIL] emailBody.cta (first 100):', JSON.stringify(emailBody?.cta?.substring(0, 100)))
+    logger.debug('========== EMAIL BODY FROM DATABASE ==========')
+    logger.debug('emailBody.greeting:', JSON.stringify(emailBody?.greeting?.substring(0, 100)))
+    logger.debug('emailBody.context_p1 (first 200):', JSON.stringify(emailBody?.context_p1?.substring(0, 200)))
+    logger.debug('emailBody.value_p2 (first 100):', JSON.stringify(emailBody?.value_p2?.substring(0, 100)))
+    logger.debug('emailBody.cta (first 100):', JSON.stringify(emailBody?.cta?.substring(0, 100)))
     
-    // Check for greeting in context_p1
-    const greetingNormDB = emailBody?.greeting?.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim().toLowerCase()
-    const contextNormDB = emailBody?.context_p1?.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim().toLowerCase()
+    // Check for greeting in context_p1 using shared utility
+    const greetingNormDB = normalizeForComparison(emailBody?.greeting || '')
+    const contextNormDB = normalizeForComparison(emailBody?.context_p1 || '')
     if (greetingNormDB && contextNormDB && contextNormDB.startsWith(greetingNormDB)) {
-      console.log('[SEND-EMAIL] !!! WARNING: Database has greeting duplicated in context_p1 !!!')
+      logger.warn('!!! WARNING: Database has greeting duplicated in context_p1 !!!')
     }
     
     const senderId = emailBody?.signatureMemberId 
@@ -165,10 +187,10 @@ export async function POST(request: NextRequest) {
       || campaign?.sender_id 
       || 'jean-francois'
     const sender = getSenderFromId(senderId)
-    console.log('[SEND-EMAIL] Sender:', sender, 'from signatureMemberId:', emailBody?.signatureMemberId)
+    logger.info('Sender:', sender, 'from signatureMemberId:', emailBody?.signatureMemberId)
 
     // Create banner config from email body settings
-    console.log('[SEND-EMAIL] Banner enabled?', emailBody?.bannerEnabled, 'Using banner URL:', DEFAULT_BANNER.imageUrl)
+    logger.debug('Banner enabled?', emailBody?.bannerEnabled, 'Using banner URL:', DEFAULT_BANNER.imageUrl)
     const banner: EmailBanner | undefined = emailBody?.bannerEnabled 
       ? { ...DEFAULT_BANNER, enabled: true }
       : undefined
@@ -184,25 +206,25 @@ export async function POST(request: NextRequest) {
 
     let messageId: string | undefined
 
+    // Get CC emails from config, filtering out sender and recipient
+    const ccEmailList = getCCEmails().filter(cc => cc !== sender.email && cc !== toEmail)
+
     if (dry_run) {
       // Dry run - just log what would be sent
-      console.log('=== DRY RUN EMAIL ===')
-      console.log('From:', `${sender.name} <${sender.email}>`)
-      console.log('To:', toEmail)
-      console.log('CC:', CC_EMAILS.filter(cc => cc !== sender.email).join(', '))
-      console.log('Subject:', email.subject)
-      console.log('Body preview:', textBody.substring(0, 200))
-      console.log('Attachments:', attachments?.length || 0)
+      logger.info('=== DRY RUN EMAIL ===')
+      logger.info('From:', `${sender.name} <${sender.email}>`)
+      logger.info('To:', toEmail)
+      logger.info('CC:', ccEmailList.join(', '))
+      logger.info('Subject:', email.subject)
+      logger.info('Body preview:', textBody.substring(0, 200))
+      logger.info('Attachments:', attachments?.length || 0)
       messageId = `dry-run-${Date.now()}`
     } else if (resend) {
-      // Filter out sender from CC list to avoid duplicate emails
-      const ccEmails = CC_EMAILS.filter(cc => cc !== sender.email && cc !== toEmail)
-      
       // Send via Resend SDK with proper headers for deliverability
       const resendPayload: any = {
         from: `${sender.name} <${sender.email}>`,
         to: [toEmail],
-        cc: ccEmails.length > 0 ? ccEmails : undefined,
+        cc: ccEmailList.length > 0 ? ccEmailList : undefined,
         subject: email.subject,
         html: htmlBody,
         text: textBody,
@@ -249,17 +271,17 @@ export async function POST(request: NextRequest) {
       const { data: sendResult, error: sendError } = await resend.emails.send(resendPayload)
 
       if (sendError) {
-        console.error('[SEND-EMAIL] Resend API error:', sendError)
+        logger.error('Resend API error:', sendError)
         throw new Error(sendError.message || 'Failed to send via Resend')
       }
 
-      console.log('[SEND-EMAIL] Resend send successful:', sendResult)
+      logger.info('Resend send successful:', sendResult)
       messageId = sendResult?.id
     } else {
       // No email provider configured - simulate send for demo
-      console.log('[SEND-EMAIL] === SIMULATED SEND (no RESEND_API_KEY configured) ===')
-      console.log('[SEND-EMAIL] To:', toEmail)
-      console.log('[SEND-EMAIL] Subject:', email.subject)
+      logger.info('=== SIMULATED SEND (no RESEND_API_KEY configured) ===')
+      logger.info('To:', toEmail)
+      logger.info('Subject:', email.subject)
       messageId = `simulated-${Date.now()}`
     }
 
@@ -267,7 +289,7 @@ export async function POST(request: NextRequest) {
     // Since Supabase JS client doesn't support transactions directly,
     // we handle errors and attempt rollback if needed
     const sentAt = new Date().toISOString()
-    console.log('[SEND-EMAIL] Updating database records...', { sentAt })
+    logger.info('Updating database records...', { sentAt })
 
     // Step 1: Update email record (including resend_message_id for webhook tracking)
     const { error: emailUpdateError } = await supabase
@@ -280,23 +302,23 @@ export async function POST(request: NextRequest) {
       .eq('id', email_id)
 
     if (emailUpdateError) {
-      console.error('[SEND-EMAIL] Failed to update email record:', emailUpdateError)
+      logger.error('Failed to update email record:', emailUpdateError)
       return NextResponse.json(
         { success: false, error: 'Failed to update email record: ' + emailUpdateError.message },
         { status: 500 }
       )
     }
-    console.log('[SEND-EMAIL] Email record updated successfully')
+    logger.info('Email record updated successfully')
 
     // Step 2: Update contact_campaign stage and pipeline_stage
-    console.log('[SEND-EMAIL] Updating contact_campaign stage...')
+    logger.info('Updating contact_campaign stage...')
     const { error: ccUpdateError } = await supabase
       .from('contact_campaigns')
       .update({ stage: 'sent', pipeline_stage: 'sent' })
       .eq('id', email.contact_campaign_id)
 
     if (ccUpdateError) {
-      console.error('[SEND-EMAIL] Failed to update contact_campaign, attempting rollback:', ccUpdateError)
+      logger.error('Failed to update contact_campaign, attempting rollback:', ccUpdateError)
       // Attempt to rollback email update
       const { error: rollbackError } = await supabase
         .from('emails')
@@ -304,7 +326,7 @@ export async function POST(request: NextRequest) {
         .eq('id', email_id)
       
       if (rollbackError) {
-        console.error('[SEND-EMAIL] CRITICAL: Rollback failed! Email marked as sent but campaign not updated:', rollbackError)
+        logger.error('CRITICAL: Rollback failed! Email marked as sent but campaign not updated:', rollbackError)
         return NextResponse.json(
           { success: false, error: 'Failed to update campaign status and rollback failed. Manual intervention required.', details: { ccError: ccUpdateError.message, rollbackError: rollbackError.message } },
           { status: 500 }
@@ -329,7 +351,7 @@ export async function POST(request: NextRequest) {
         })
       
       if (eventError) {
-        console.warn('[SEND-EMAIL] Failed to log engagement event (non-critical):', eventError)
+        logger.warn('Failed to log engagement event (non-critical):', eventError)
       }
     }
 
@@ -345,7 +367,7 @@ export async function POST(request: NextRequest) {
     })
     
     if (rpcError) {
-      console.warn('[SEND-EMAIL] RPC failed, trying manual upsert:', rpcError)
+      logger.warn('RPC failed, trying manual upsert:', rpcError)
       // Manual upsert fallback
       const { data: existing } = await supabase
         .from('analytics_daily')
@@ -778,6 +800,7 @@ ${COMPANY_INFO.website}
 // ============================================
 // BULK SEND HANDLER
 // For sending 100s or 1000s of emails
+// Sequential sending with rate limiting for Resend API
 // ============================================
 
 async function handleBulkSend(request: BulkSendRequest) {
@@ -823,8 +846,14 @@ async function handleBulkSend(request: BulkSendRequest) {
     }, { status: 404 })
   }
 
+  // RATE LIMITING CONFIGURATION
+  // Resend free tier: 2 requests/second
+  // We send at ~1.5 req/sec to stay safely under the limit
+  const DELAY_BETWEEN_EMAILS_MS = 700  // 700ms = ~1.4 emails/sec
+
   // Dry run - return what would be sent
   if (dry_run) {
+    const estimatedTimeSeconds = Math.ceil(emails.length * DELAY_BETWEEN_EMAILS_MS / 1000)
     return NextResponse.json({
       success: true,
       dry_run: true,
@@ -835,7 +864,7 @@ async function handleBulkSend(request: BulkSendRequest) {
         subject: e.subject,
         contact_name: `${e.contact_campaign?.contact?.first_name} ${e.contact_campaign?.contact?.last_name}`
       })),
-      estimated_time: `${Math.ceil(emails.length / BATCH_SIZE) * (BATCH_DELAY_MS / 1000)}s`
+      estimated_time: `${estimatedTimeSeconds}s (~${Math.ceil(estimatedTimeSeconds / 60)} minutes)`
     })
   }
 
@@ -854,44 +883,52 @@ async function handleBulkSend(request: BulkSendRequest) {
   const effectiveSenderId = sender_id || campaign?.sender_id || 'jean-francois'
   const senderInfo = getSenderFromId(effectiveSenderId)
 
-  // Process in batches with rate limiting
-  for (let i = 0; i < emails.length; i += BATCH_SIZE) {
-    const batch = emails.slice(i, i + BATCH_SIZE)
+  // RATE LIMITING: Send emails SEQUENTIALLY with retry logic
+  // Resend free tier: 2 requests/second, we send at ~1.4/sec to be safe
+  const MAX_RETRIES = 3
+  const RETRY_BASE_DELAY_MS = 2000
 
-    const batchPromises = batch.map(async (email) => {
-      const contact = email.contact_campaign?.contact
-      const toEmail = contact?.email
+  logger.info(`Starting sequential bulk send of ${emails.length} emails at ~1.4/sec rate`)
 
-      if (!toEmail) {
-        results.skipped++
-        results.errors.push({ email_id: email.id, error: 'No recipient email' })
-        return
-      }
+  for (let i = 0; i < emails.length; i++) {
+    const email = emails[i]
+    const contact = email.contact_campaign?.contact
+    const toEmail = contact?.email
 
-      const emailBody = email.current_body || email.original_body
-      
-      // Use per-email sender from emailBody, or fall back to request sender_id, then campaign sender
-      const emailSenderId = emailBody?.signatureMemberId || effectiveSenderId
-      const emailSenderInfo = getSenderFromId(emailSenderId)
-      
-      const textBody = buildTextEmail(emailBody, emailSenderId)
-      
-      // Create banner config from email body settings  
-      const emailBanner: EmailBanner | undefined = emailBody?.bannerEnabled 
-        ? { ...DEFAULT_BANNER, enabled: true }
-        : undefined
-      
-      const htmlBody = buildHtmlEmail(emailBody, contact, emailSenderId, emailBanner)
+    if (!toEmail) {
+      results.skipped++
+      results.errors.push({ email_id: email.id, error: 'No recipient email' })
+      continue
+    }
 
-      // Fetch attachments if any (same as single send)
-      const { data: attachments } = await supabase
-        .from('email_attachments')
-        .select('*')
-        .eq('email_id', email.id)
+    const emailBody = email.current_body || email.original_body
+    
+    // Use per-email sender from emailBody, or fall back to request sender_id, then campaign sender
+    const emailSenderId = emailBody?.signatureMemberId || effectiveSenderId
+    const emailSenderInfo = getSenderFromId(emailSenderId)
+    
+    const textBody = buildTextEmail(emailBody, emailSenderId)
+    
+    // Create banner config from email body settings  
+    const emailBanner: EmailBanner | undefined = emailBody?.bannerEnabled 
+      ? { ...DEFAULT_BANNER, enabled: true }
+      : undefined
+    
+    const htmlBody = buildHtmlEmail(emailBody, contact, emailSenderId, emailBanner)
 
+    // Fetch attachments if any (same as single send)
+    const { data: attachments } = await supabase
+      .from('email_attachments')
+      .select('*')
+      .eq('email_id', email.id)
+
+    // Send with retry logic for rate limit errors
+    let retryCount = 0
+    let success = false
+    let messageId: string = ''
+
+    while (retryCount <= MAX_RETRIES && !success) {
       try {
-        let messageId: string
-
         if (resend) {
           // Build send payload using per-email sender
           const resendPayload: any = {
@@ -905,7 +942,6 @@ async function handleBulkSend(request: BulkSendRequest) {
               { name: 'campaign', value: campaign_id },
               { name: 'contact', value: contact.id }
             ],
-            // Enable tracking for opens and clicks
             tracking: {
               open: true,
               click: true,
@@ -936,14 +972,26 @@ async function handleBulkSend(request: BulkSendRequest) {
           const { data: sendResult, error: sendError } = await resend.emails.send(resendPayload)
 
           if (sendError) {
+            // Check if it's a rate limit error
+            if (sendError.message?.includes('rate') || sendError.message?.includes('429') || sendError.message?.includes('Too many')) {
+              if (retryCount < MAX_RETRIES) {
+                const retryDelay = RETRY_BASE_DELAY_MS * Math.pow(2, retryCount)
+                logger.warn(`Rate limited on email ${email.id}, retrying in ${retryDelay}ms (attempt ${retryCount + 1}/${MAX_RETRIES})`)
+                await new Promise(resolve => setTimeout(resolve, retryDelay))
+                retryCount++
+                continue
+              }
+            }
             throw new Error(sendError.message)
           }
 
           messageId = sendResult?.id || `resend-${Date.now()}`
+          success = true
         } else {
           // Simulated send (no API key)
           console.log(`[SIMULATED] Sending to ${toEmail}: ${email.subject}`)
           messageId = `simulated-${Date.now()}-${Math.random().toString(36).slice(2)}`
+          success = true
         }
 
         // Update database
@@ -975,26 +1023,39 @@ async function handleBulkSend(request: BulkSendRequest) {
         results.message_ids.push(messageId)
 
       } catch (err: any) {
-        results.failed++
-        results.errors.push({ email_id: email.id, error: err.message })
+        if (retryCount < MAX_RETRIES) {
+          const retryDelay = RETRY_BASE_DELAY_MS * Math.pow(2, retryCount)
+          logger.warn(`Error sending email ${email.id}, retrying in ${retryDelay}ms: ${err.message}`)
+          await new Promise(resolve => setTimeout(resolve, retryDelay))
+          retryCount++
+        } else {
+          results.failed++
+          results.errors.push({ email_id: email.id, error: err.message })
+          break
+        }
       }
-    })
+    }
 
-    await Promise.all(batchPromises)
+    // Log progress every 10 emails
+    if ((i + 1) % 10 === 0) {
+      logger.info(`Bulk send progress: ${i + 1}/${emails.length} processed (${results.sent} sent, ${results.failed} failed)`)
+    }
 
-    // Rate limiting delay between batches
-    if (i + BATCH_SIZE < emails.length) {
-      await new Promise(resolve => setTimeout(resolve, BATCH_DELAY_MS))
+    // Add delay between emails (not after the last one)
+    if (i < emails.length - 1) {
+      await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_EMAILS_MS))
     }
   }
+
+  logger.info(`Bulk send completed: ${results.sent} sent, ${results.failed} failed, ${results.skipped} skipped`)
 
   return NextResponse.json({
     success: true,
     stats: results,
     resend_configured: !!resend,
     rate_limit: {
-      batch_size: BATCH_SIZE,
-      delay_ms: BATCH_DELAY_MS
+      emails_per_second: 1.4,
+      delay_ms: DELAY_BETWEEN_EMAILS_MS
     }
   })
 }

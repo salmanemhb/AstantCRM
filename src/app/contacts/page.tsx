@@ -19,6 +19,7 @@ import type { Contact, ContactList } from '@/lib/types'
 import { formatDate } from '@/lib/utils'
 import { formatCellValue } from '@/lib/spreadsheet-parser'
 import ImportContactsModal from '@/components/import-contacts-modal'
+import { useToast } from '@/components/toast'
 
 // Demo data - only shown in development when no real data exists
 const DEMO_LISTS: (ContactList & { contacts: Contact[] })[] = process.env.NODE_ENV === 'development' ? [
@@ -91,6 +92,7 @@ const DEMO_LISTS: (ContactList & { contacts: Contact[] })[] = process.env.NODE_E
 ] : []
 
 export default function ContactsPage() {
+  const { showToast } = useToast()
   const [lists, setLists] = useState<(ContactList & { contacts: Contact[] })[]>([])
   const [manualContacts, setManualContacts] = useState<Contact[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -211,7 +213,7 @@ export default function ContactsPage() {
       console.log('[ContactsPage] List deleted successfully')
     } catch (err) {
       console.error('[ContactsPage] Failed to delete list:', err)
-      alert('Failed to delete list. Please try again.')
+      showToast('Failed to delete list. Please try again.', 'error')
     }
   }
 

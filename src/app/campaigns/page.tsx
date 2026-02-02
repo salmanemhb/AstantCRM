@@ -21,6 +21,7 @@ import { TEAM_MEMBERS, getSignatureText, COMPANY_INFO } from '@/lib/signatures'
 import { EMAIL_TEMPLATES, TEMPLATE_CATEGORIES, getTemplatesByCategory, type EmailTemplate } from '@/lib/email-templates'
 import SignatureSelector from '@/components/signature-selector'
 import TemplateSelector from '@/components/template-selector'
+import { useToast } from '@/components/toast'
 import { PROMPT_PRESETS, getPresetByCategory, type PromptCategory, type PromptPreset } from '@/lib/prompt-presets'
 
 interface Campaign {
@@ -75,6 +76,7 @@ Best,
 
 export default function CampaignsPage() {
   const router = useRouter()
+  const { showToast } = useToast()
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [showCreateModal, setShowCreateModal] = useState(false)
@@ -211,7 +213,7 @@ export default function CampaignsPage() {
       console.log('Delete successful!')
     } catch (err) {
       console.error('Failed to delete campaign:', err)
-      alert('Failed to delete campaign: ' + (err instanceof Error ? err.message : 'Unknown error'))
+      showToast('Failed to delete campaign: ' + (err instanceof Error ? err.message : 'Unknown error'), 'error')
     }
   }
 

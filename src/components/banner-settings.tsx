@@ -2,6 +2,7 @@
 
 import { useState, useRef } from 'react'
 import { Upload, X, Image as ImageIcon, Link, ToggleLeft, ToggleRight, Eye } from 'lucide-react'
+import { useToast } from './toast'
 import type { EmailBanner } from '@/lib/email-formatting'
 
 interface BannerSettingsProps {
@@ -10,6 +11,7 @@ interface BannerSettingsProps {
 }
 
 export function BannerSettings({ banner, onChange }: BannerSettingsProps) {
+  const { showToast } = useToast()
   const [uploading, setUploading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   
@@ -23,13 +25,13 @@ export function BannerSettings({ banner, onChange }: BannerSettingsProps) {
     
     // Validate file type
     if (!file.type.startsWith('image/')) {
-      alert('Please select an image file')
+      showToast('Please select an image file', 'error')
       return
     }
     
     // Validate file size (max 2MB)
     if (file.size > 2 * 1024 * 1024) {
-      alert('Image must be less than 2MB')
+      showToast('Image must be less than 2MB', 'error')
       return
     }
     

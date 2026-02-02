@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { Resend } from 'resend'
+import { createLogger } from '@/lib/logger'
 
 // ============================================
 // REPLY DETECTION API
@@ -8,10 +9,11 @@ import { Resend } from 'resend'
 // If someone replied, they definitely opened the email
 // ============================================
 
+const logger = createLogger('sync-replies')
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null
 
 export async function POST(request: NextRequest) {
-  console.log('[SYNC-REPLIES] Starting reply sync...')
+  logger.info('Starting reply sync...')
 
   try {
     const supabase = createClient()
@@ -54,7 +56,7 @@ export async function POST(request: NextRequest) {
     const { data: sentEmails, error: emailsError } = await query
 
     if (emailsError) {
-      console.error('[SYNC-REPLIES] Error fetching emails:', emailsError)
+      logger.error('Error fetching emails:', emailsError)
       return NextResponse.json({ error: emailsError.message }, { status: 500 })
     }
 
@@ -67,7 +69,7 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    console.log(`[SYNC-REPLIES] Checking ${sentEmails.length} emails for replies...`)
+    logger.info(`Checking ${sentEmails.length} emails for replies...`)
 
     // For each sent email, we'll check if we received a reply
     // We can detect replies by checking:
@@ -137,7 +139,7 @@ export async function POST(request: NextRequest) {
         }
 
         opensInferred++
-        console.log(`[SYNC-REPLIES] Inferred open from click for email ${email.id}`)
+        logger.debug(`Inferred open from click for email ${email.id}`)
       }
 
       // Check 2: Look for engagement events that indicate a reply
@@ -172,7 +174,7 @@ export async function POST(request: NextRequest) {
         await updateEngagementForReply(supabase, contactCampaign.contact_id, now)
 
         repliesFound++
-        console.log(`[SYNC-REPLIES] Marked email ${email.id} as replied`)
+        logger.info(`Marked email ${email.id} as replied`)
       }
     }
 
@@ -195,7 +197,7 @@ export async function POST(request: NextRequest) {
           })
         }
       } catch (rpcError) {
-        console.warn('[SYNC-REPLIES] RPC error (non-fatal):', rpcError)
+        logger.warn('RPC error (non-fatal):', rpcError)
       }
     }
 
@@ -208,7 +210,7 @@ export async function POST(request: NextRequest) {
     })
 
   } catch (error) {
-    console.error('[SYNC-REPLIES] Error:', error)
+    logger.error('Error:', error)
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Sync failed' },
       { status: 500 }
@@ -295,7 +297,7 @@ export async function PUT(request: NextRequest) {
     }
 
   } catch (error) {
-    console.error('[SYNC-REPLIES] PUT error:', error)
+    logger.error('PUT error:', error)
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Update failed' },
       { status: 500 }
@@ -339,7 +341,7 @@ async function updateEngagementForReply(supabase: any, contactId: string, timest
   try {
     await supabase.rpc('update_engagement_score', { p_contact_id: contactId })
   } catch (err) {
-    console.warn('[SYNC-REPLIES] Score recalc error:', err)
+    logger.warn('Score recalc error:', err)
   }
 }
 
@@ -380,7 +382,7 @@ export async function GET() {
     })
 
   } catch (error) {
-    console.error('[SYNC-REPLIES] GET error:', error)
+    logger.error('GET error:', error)
     return NextResponse.json({ error: 'Failed to get stats' }, { status: 500 })
   }
 }

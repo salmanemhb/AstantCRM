@@ -61,7 +61,7 @@ export function EmailCard({
 
   return (
     <div className={cn(
-      "bg-white rounded-2xl shadow-xl border border-gray-200 overflow-hidden max-w-2xl w-full",
+      "bg-white rounded-2xl shadow-xl border border-gray-200 overflow-hidden max-w-3xl w-full",
       animationClass
     )}>
       {/* Header */}

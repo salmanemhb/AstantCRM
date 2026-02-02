@@ -11,6 +11,16 @@ import {
 } from '@/lib/template-personalization'
 import { getMemberById, TEAM_MEMBERS } from '@/lib/signatures'
 import { boldImportantWords, extractNamesFromContact, createAIBoldingPrompt, convertMarkdownBold } from '@/lib/email-formatting'
+import { createLogger } from '@/lib/logger'
+import { 
+  isGreetingParagraph as checkIsGreeting, 
+  extractGreetingFromHtml,
+  hasListElements,
+  hasBlockElements,
+  normalizeForComparison
+} from '@/lib/email-utils'
+
+const logger = createLogger('generate-claude')
 
 // Valid sender IDs for validation
 const VALID_SENDER_IDS = new Set(TEAM_MEMBERS.map(m => m.id))
@@ -88,14 +98,14 @@ Return JSON only:
     try {
       const parsed = JSON.parse(cleanContent)
       if (parsed.needsFix && parsed.correctedBody) {
-        console.log(`[VERIFY] Fixed sender name inconsistency for ${senderId}`)
+        logger.info(`Fixed sender name inconsistency for sender: ${senderId}`)
         return { body: parsed.correctedBody, subject, wasFixed: true }
       }
     } catch {
       // Parsing failed, return original
     }
   } catch (error) {
-    console.error('[VERIFY] OpenAI verification failed:', error)
+    logger.error('OpenAI verification failed:', error)
   }
 
   return { body, subject, wasFixed: false }
@@ -129,13 +139,13 @@ async function applyDynamicBolding(
     
     return response.choices[0]?.message?.content?.trim() || text
   } catch (error) {
-    console.error('[DYNAMIC-BOLD] OpenAI error:', error)
+    logger.error('OpenAI dynamic bolding error:', error)
     return text
   }
 }
 
 export async function POST(request: NextRequest) {
-  console.log('[GENERATE-CLAUDE] Starting request...')
+  logger.info('Starting email generation request...')
   try {
     const { 
       contact_id, 
@@ -144,7 +154,7 @@ export async function POST(request: NextRequest) {
       config = {},
     } = await request.json()
     
-    console.log('[GENERATE-CLAUDE] Received:', { contact_id, campaign_id, config })
+    logger.info('Received:', { contact_id, campaign_id, config })
 
     // Preview mode for testing
     const isPreview = contact_id === 'preview' && campaign_id === 'preview'
@@ -163,7 +173,7 @@ export async function POST(request: NextRequest) {
 
     // Validate sender_id
     if (!VALID_SENDER_IDS.has(senderId)) {
-      console.error('[GENERATE-CLAUDE] Invalid sender_id:', senderId)
+      logger.error('Invalid sender_id:', senderId)
       return NextResponse.json(
         { error: `Invalid sender_id: ${senderId}. Valid options: ${Array.from(VALID_SENDER_IDS).join(', ')}` },
         { status: 400 }
@@ -204,7 +214,7 @@ export async function POST(request: NextRequest) {
 
       // Campaign is optional - log warning but continue
       if (campaignError || !campaignData) {
-        console.warn(`Campaign ${campaign_id} not found in database, continuing with default settings`)
+        logger.warn(`Campaign ${campaign_id} not found in database, continuing with default settings`)
       } else {
         campaign = campaignData
         
@@ -223,7 +233,7 @@ export async function POST(request: NextRequest) {
               templateId = ctx.template_id
             }
           } catch (e) {
-            console.warn('Failed to parse campaign global_context:', e)
+            logger.warn('Failed to parse campaign global_context:', e)
           }
         }
         
@@ -243,7 +253,7 @@ export async function POST(request: NextRequest) {
     // ============================================
     let template: any = null
     
-    console.log('[GENERATE-CLAUDE] Template resolution - campaign:', {
+    logger.debug('Template resolution - campaign:', {
       template_subject: campaign?.template_subject?.substring(0, 50),
       template_body: campaign?.template_body?.substring(0, 100),
       templateId,
@@ -251,7 +261,7 @@ export async function POST(request: NextRequest) {
     
     // Priority 1: Use campaign's stored template if it has one
     if (campaign?.template_subject && campaign?.template_body) {
-      console.log('[GENERATE-CLAUDE] ✅ Using campaign\'s stored template (Priority 1)')
+      logger.debug('Using campaign stored template (Priority 1)')
       template = {
         id: `campaign-${campaign_id}`,
         name: campaign.name || 'Campaign Template',
@@ -263,7 +273,7 @@ export async function POST(request: NextRequest) {
     
     // Priority 2: Check if templateId is a UUID (custom template)
     if (!template && templateId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(templateId)) {
-      console.log('[GENERATE-CLAUDE] Fetching custom template:', templateId)
+      logger.debug('Fetching custom template:', templateId)
       const supabase = createClient()
       const { data: customTemplate, error: customError } = await supabase
         .from('custom_templates')
@@ -272,7 +282,7 @@ export async function POST(request: NextRequest) {
         .single()
       
       if (!customError && customTemplate) {
-        console.log('[GENERATE-CLAUDE] Found custom template:', customTemplate.name)
+        logger.debug('Found custom template:', customTemplate.name)
         template = {
           id: customTemplate.id,
           name: customTemplate.name,
@@ -286,7 +296,7 @@ export async function POST(request: NextRequest) {
     // Priority 3: Built-in master template by ID
     if (!template) {
       template = getTemplateById(templateId) || MASTER_TEMPLATES[0]
-      console.log('[GENERATE-CLAUDE] Using built-in template:', template?.id || 'default')
+      logger.debug('Using built-in template:', template?.id || 'default')
     }
 
     // Personalize the template
@@ -333,16 +343,16 @@ export async function POST(request: NextRequest) {
       wasVerified = true
       
       if (verified.wasFixed) {
-        console.log(`[VERIFY] Corrected email sender inconsistency`)
+        logger.info('Corrected email sender inconsistency')
       }
     }
 
     // Body now includes signature via [SENDER_*] placeholders
     const fullBody = body
 
-    console.log('[GENERATE-CLAUDE] ========== TEMPLATE PARSING DEBUG ==========')
-    console.log('[GENERATE-CLAUDE] Raw body (first 300 chars):', JSON.stringify(body?.substring(0, 300)))
-    console.log('[GENERATE-CLAUDE] Body length:', body?.length)
+    logger.debug('========== TEMPLATE PARSING DEBUG ==========')
+    logger.debug('Raw body (first 300 chars):', JSON.stringify(body?.substring(0, 300)))
+    logger.debug('Body length:', body?.length)
 
     // Parse body into structured format for GmailEmailComposer
     // Handle both plain text (split by \n\n) and HTML (split by </p><p> or </p>\s*<p>)
@@ -360,16 +370,16 @@ export async function POST(request: NextRequest) {
         const content = p.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').trim()
         return content.length > 0
       })
-      console.log('[GENERATE-CLAUDE] HTML body detected, extracted', paragraphs.length, 'non-empty blocks (p/ul/ol)')
+      logger.debug('HTML body detected, extracted', paragraphs.length, 'non-empty blocks (p/ul/ol)')
     } else {
       // Plain text body - split by double newlines
       paragraphs = body.split(/\n\n+/).filter((p: string) => p.trim())
-      console.log('[GENERATE-CLAUDE] Plain text body detected')
+      logger.debug('Plain text body detected')
     }
     
-    console.log('[GENERATE-CLAUDE] Paragraph count:', paragraphs.length)
+    logger.debug('Paragraph count:', paragraphs.length)
     paragraphs.forEach((p, i) => {
-      console.log(`[GENERATE-CLAUDE] Paragraph ${i}:`, JSON.stringify(p.substring(0, 100)))
+      logger.debug(`Paragraph ${i}:`, JSON.stringify(p.substring(0, 100)))
     })
     
     // Intelligently split into sections:
@@ -383,19 +393,15 @@ export async function POST(request: NextRequest) {
     let value_p2 = ''
     let cta = ''
     
-    // Helper to check if a paragraph is just a greeting (short, ends with comma)
-    const isGreetingParagraph = (p: string): boolean => {
-      const text = p.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').trim()
-      // Match: Good morning Name, | Hi Name, | Hello Name, | Dear Name, etc.
-      return /^(good\s+morning|good\s+afternoon|good\s+evening|hi|hello|dear|hey)\s+[\w\s]+,?\s*$/i.test(text)
-    }
+    // Use shared utility from email-utils.ts (renamed import to avoid shadowing)
+    const isGreetingParagraph = checkIsGreeting
     
     // Check if the template has lists - if so, DON'T SPLIT, keep the entire body intact
-    const hasLists = /<ul[\s>]|<ol[\s>]|<li[\s>]/i.test(body)
+    const hasLists = hasListElements(body)
     
     if (hasLists) {
       // Template has HTML lists - keep the ORIGINAL body intact, just extract greeting
-      console.log('[GENERATE-CLAUDE] Template has HTML lists, preserving original structure')
+      logger.debug('Template has HTML lists, preserving original structure')
       
       // Find and extract the first <p> that contains a greeting
       const firstPMatch = body.match(/^(\s*<p[^>]*>[\s\S]*?<\/p>)/i)
@@ -403,11 +409,11 @@ export async function POST(request: NextRequest) {
         greeting = firstPMatch[1]
         // Keep everything after the greeting paragraph as context_p1
         context_p1 = body.substring(firstPMatch[0].length).trim()
-        console.log('[GENERATE-CLAUDE] Extracted greeting, rest of body preserved intact')
+        logger.debug('Extracted greeting, rest of body preserved intact')
       } else {
         // No clear greeting, put everything in context_p1
         context_p1 = body
-        console.log('[GENERATE-CLAUDE] No greeting found, entire body in context_p1')
+        logger.debug('No greeting found, entire body in context_p1')
       }
     } else if (paragraphs.length >= 4) {
       greeting = paragraphs[0]
@@ -446,7 +452,7 @@ export async function POST(request: NextRequest) {
       const greetingMatch = text.match(/^((?:good\s+morning|good\s+afternoon|good\s+evening|hi|hello|dear|hey)\s+[\w\s]+),?\s*/i)
       
       if (greetingMatch) {
-        console.log('[GENERATE-CLAUDE] Extracting greeting from single paragraph:', greetingMatch[0])
+        logger.debug('Extracting greeting from single paragraph:', greetingMatch[0])
         greeting = greetingMatch[1] + ','
         // Remove the greeting from context_p1
         // For HTML, we need to remove the first <p> if it's just the greeting, or just the text
@@ -463,17 +469,17 @@ export async function POST(request: NextRequest) {
       }
     }
     
-    console.log('[GENERATE-CLAUDE] ========== AFTER SPLITTING ==========')
-    console.log('[GENERATE-CLAUDE] greeting:', JSON.stringify(greeting?.substring(0, 100)))
-    console.log('[GENERATE-CLAUDE] context_p1 (first 150):', JSON.stringify(context_p1?.substring(0, 150)))
-    console.log('[GENERATE-CLAUDE] value_p2 (first 100):', JSON.stringify(value_p2?.substring(0, 100)))
-    console.log('[GENERATE-CLAUDE] cta (first 100):', JSON.stringify(cta?.substring(0, 100)))
+    logger.debug('========== AFTER SPLITTING ==========')
+    logger.debug('greeting:', JSON.stringify(greeting?.substring(0, 100)))
+    logger.debug('context_p1 (first 150):', JSON.stringify(context_p1?.substring(0, 150)))
+    logger.debug('value_p2 (first 100):', JSON.stringify(value_p2?.substring(0, 100)))
+    logger.debug('cta (first 100):', JSON.stringify(cta?.substring(0, 100)))
     
     // Check if context_p1 starts with the greeting (this would be a BUG)
     const greetingNormCheck = greeting?.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim().toLowerCase()
     const contextNormCheck = context_p1?.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim().toLowerCase()
     if (greetingNormCheck && contextNormCheck && contextNormCheck.startsWith(greetingNormCheck)) {
-      console.log('[GENERATE-CLAUDE] !!! BUG DETECTED: context_p1 starts with greeting !!!')
+      logger.warn('BUG DETECTED: context_p1 starts with greeting')
     }
     
     // Create structured email body
@@ -505,7 +511,7 @@ export async function POST(request: NextRequest) {
     if (applyBolding) {
       if (useDynamicBolding && !isPreview) {
         // AI-powered dynamic bolding (smarter, but slower)
-        console.log('[GENERATE-CLAUDE] Using dynamic AI bolding...')
+        logger.debug('Using dynamic AI bolding...')
         const [c, v, ct] = await Promise.all([
           applyDynamicBolding(context_p1, boldingContext),
           applyDynamicBolding(value_p2, boldingContext),
@@ -538,9 +544,9 @@ export async function POST(request: NextRequest) {
       const contextNorm = normalizeForComparison(boldedContext)
       
       if (contextNorm.startsWith(greetingNorm) && greetingNorm.length > 5) {
-        console.log('[GENERATE-CLAUDE] WARNING: Greeting found at start of context_p1, stripping...')
-        console.log('[GENERATE-CLAUDE] Greeting:', greetingNorm)
-        console.log('[GENERATE-CLAUDE] Context starts with:', contextNorm.substring(0, greetingNorm.length + 20))
+        logger.warn('Greeting found at start of context_p1, stripping...')
+        logger.debug('Greeting:', greetingNorm)
+        logger.debug('Context starts with:', contextNorm.substring(0, greetingNorm.length + 20))
         
         // Strip the greeting from context_p1
         // Find where the greeting ends in the original HTML
@@ -571,7 +577,7 @@ export async function POST(request: NextRequest) {
         while (foundEnd < tempContent.length && /[\s,\n]/.test(tempContent[foundEnd])) foundEnd++
         
         boldedContext = tempContent.substring(foundEnd).trim()
-        console.log('[GENERATE-CLAUDE] Stripped context_p1 now starts with:', boldedContext.substring(0, 50))
+        logger.debug('Stripped context_p1 now starts with:', boldedContext.substring(0, 50))
       }
     }
     
@@ -591,7 +597,7 @@ export async function POST(request: NextRequest) {
     if (!isPreview) {
       const supabase = createClient()
       
-      console.log('[GENERATE-CLAUDE] Looking for contact_campaign:', { contact_id, campaign_id })
+      logger.debug('Looking for contact_campaign:', { contact_id, campaign_id })
       
       // Retry logic to handle race condition when contact_campaign was just created
       let existingCC: { id: string } | null = null
@@ -611,17 +617,17 @@ export async function POST(request: NextRequest) {
         existingCC = ccRows?.[0] || null
         
         if (existingCC) {
-          console.log(`[GENERATE-CLAUDE] contact_campaign found on attempt ${attempt}:`, existingCC.id)
+          logger.debug(`contact_campaign found on attempt ${attempt}:`, existingCC.id)
           break
         }
         
         if (attempt < maxRetries) {
-          console.log(`[GENERATE-CLAUDE] contact_campaign not found, retrying in ${retryDelay}ms (attempt ${attempt}/${maxRetries})`)
+          logger.debug(`contact_campaign not found, retrying in ${retryDelay}ms (attempt ${attempt}/${maxRetries})`)
           await new Promise(resolve => setTimeout(resolve, retryDelay))
         }
       }
       
-      console.log('[GENERATE-CLAUDE] contact_campaign lookup result:', { existingCC, ccLookupError })
+      logger.debug('contact_campaign lookup result:', { existingCC, ccLookupError })
 
       if (existingCC) {
         // Convert numeric confidence to enum value
@@ -637,13 +643,13 @@ export async function POST(request: NextRequest) {
           .limit(1)
         
         if (existingEmailError) {
-          console.warn('[GENERATE-CLAUDE] Failed to check for existing emails:', existingEmailError)
+          logger.warn('Failed to check for existing emails:', existingEmailError)
         }
         
         // If there's already a draft email, update it instead of creating a new one
         if (existingEmails && existingEmails.length > 0) {
           const existingEmail = existingEmails[0]
-          console.log('[GENERATE-CLAUDE] Updating existing draft email:', existingEmail.id)
+          logger.debug('Updating existing draft email:', existingEmail.id)
           
           const { data: updatedEmail, error: updateError } = await supabase
             .from('emails')
@@ -659,7 +665,7 @@ export async function POST(request: NextRequest) {
             .single()
           
           if (updateError) {
-            console.error('Failed to update email:', updateError)
+            logger.error('Failed to update email:', updateError)
             return NextResponse.json(
               { error: 'Failed to update email in database', details: updateError.message },
               { status: 500 }
@@ -669,7 +675,7 @@ export async function POST(request: NextRequest) {
           emailId = existingEmail.id
         } else {
           // No existing draft - create new email
-          console.log('[GENERATE-CLAUDE] Inserting email for cc:', existingCC.id)
+          logger.debug('Inserting email for cc:', existingCC.id)
           
           const { data: email, error: emailError } = await supabase
             .from('emails')
@@ -684,10 +690,10 @@ export async function POST(request: NextRequest) {
             .select()
             .single()
           
-          console.log('[GENERATE-CLAUDE] Email insert result:', { email: email?.id, emailError })
+          logger.debug('Email insert result:', { email: email?.id, emailError })
 
           if (emailError) {
-            console.error('Failed to save email:', emailError)
+            logger.error('Failed to save email:', emailError)
             return NextResponse.json(
               { error: 'Failed to save email to database', details: emailError.message },
               { status: 500 }
@@ -713,7 +719,7 @@ export async function POST(request: NextRequest) {
           })
           .eq('id', existingCC.id)
       } else {
-        console.error('No contact_campaign found for contact_id:', contact_id, 'campaign_id:', campaign_id)
+        logger.error('No contact_campaign found for contact_id:', contact_id, 'campaign_id:', campaign_id)
         return NextResponse.json(
           { error: 'No contact_campaign found. Ensure contact is added to campaign first.' },
           { status: 404 }
@@ -749,7 +755,7 @@ export async function POST(request: NextRequest) {
     })
 
   } catch (error: any) {
-    console.error('Personalization error:', error)
+    logger.error('Personalization error:', error)
     
     return NextResponse.json({
       error: error.message || 'Failed to personalize template',

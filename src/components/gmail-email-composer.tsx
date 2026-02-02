@@ -43,6 +43,7 @@ import type { Email, EmailJsonBody, EmailAttachment } from '@/lib/types'
 import { TEAM_MEMBERS, COMPANY_INFO, getSignatureText, getSignatureHtml, getMemberById } from '@/lib/signatures'
 import { DEFAULT_BANNER, BANNER_URL, type EmailBanner } from '@/lib/email-formatting'
 import { updateSenderInBody } from '@/lib/template-utils'
+import { useToast } from './toast'
 
 // Attachment type for local state
 interface LocalAttachment {
@@ -357,8 +358,8 @@ function EmailPreviewModal({
   const member = getMemberById(signatureMemberId)
   
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-5xl max-h-[95vh] overflow-hidden flex flex-col animate-scale-in">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-gray-50">
           <h2 className="text-lg font-semibold text-gray-900">Email Preview</h2>
@@ -506,6 +507,7 @@ export default function GmailEmailComposer({
   onDelete,
   onSaveFormat
 }: GmailEmailComposerProps) {
+  const { showToast } = useToast()
   const [isExpanded, setIsExpanded] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [isSending, setIsSending] = useState(false)
@@ -569,7 +571,7 @@ export default function GmailEmailComposer({
     for (const file of Array.from(files)) {
       // Check file size
       if (file.size > 10 * 1024 * 1024) {
-        alert(`File "${file.name}" is too large. Maximum size is 10MB.`)
+        showToast(`File "${file.name}" is too large. Maximum size is 10MB.`, 'error')
         continue
       }
       

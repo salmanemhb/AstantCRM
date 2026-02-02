@@ -12,10 +12,13 @@ import {
   Send,
   ChevronDown,
   PenTool,
-  Plus
+  Plus,
+  AlertTriangle
 } from 'lucide-react'
 import RichTextEditor from './rich-text-editor'
 import type { Email, EmailJsonBody } from '@/lib/types'
+import { UI_CONFIG } from '@/lib/config'
+import { ConfirmDialog } from './toast'
 
 interface Attachment {
   id: string
@@ -94,6 +97,7 @@ export default function EmailEditorModal({
   const [isSending, setIsSending] = useState(false)
   const [showSignatures, setShowSignatures] = useState(false)
   const [signatures] = useState<Signature[]>(DEFAULT_SIGNATURES)
+  const [showSendConfirm, setShowSendConfirm] = useState(false)
   
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -175,29 +179,39 @@ export default function EmailEditorModal({
     try {
       await handleSave()
       await onSend()
+      setShowSendConfirm(false)
     } finally {
       setIsSending(false)
     }
   }
 
+  const handleSendClick = () => {
+    // Show confirmation dialog before sending
+    setShowSendConfirm(true)
+  }
+
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[90vh] flex flex-col shadow-xl">
-        {/* Header */}
-        <div className="p-6 border-b border-gray-200 flex items-start justify-between">
-          <div>
-            <h2 className="text-xl font-bold text-gray-900">Edit Email</h2>
-            <p className="text-sm text-gray-500 mt-1">
-              To: {contactName} {contactFirm && `(${contactFirm})`} • {contactEmail}
-            </p>
+    <>
+      <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+        <div 
+          className="bg-white rounded-2xl w-full max-h-[95vh] flex flex-col shadow-2xl animate-scale-in"
+          style={{ maxWidth: UI_CONFIG.modals.xlarge }}
+        >
+          {/* Header */}
+          <div className="p-6 border-b border-gray-200 flex items-start justify-between">
+            <div>
+              <h2 className="text-xl font-bold text-gray-900">Edit Email</h2>
+              <p className="text-sm text-gray-500 mt-1">
+                To: {contactName} {contactFirm && `(${contactFirm})`} • {contactEmail}
+              </p>
+            </div>
+            <button
+              onClick={onClose}
+              className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+            >
+              <X className="h-5 w-5" />
+            </button>
           </div>
-          <button
-            onClick={onClose}
-            className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg"
-          >
-            <X className="h-5 w-5" />
-          </button>
-        </div>
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-6 space-y-6">
@@ -338,7 +352,7 @@ export default function EmailEditorModal({
         <div className="p-6 border-t border-gray-200 flex items-center justify-between bg-gray-50 rounded-b-2xl">
           <button
             onClick={onClose}
-            className="px-4 py-2 text-gray-600 hover:text-gray-900"
+            className="px-4 py-2 text-gray-600 hover:text-gray-900 transition-colors"
           >
             Cancel
           </button>
@@ -346,22 +360,36 @@ export default function EmailEditorModal({
             <button
               onClick={handleSave}
               disabled={isSaving}
-              className="flex items-center space-x-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-100 disabled:opacity-50"
+              className="flex items-center space-x-2 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-100 disabled:opacity-50 transition-colors"
             >
               <Save className="h-4 w-4" />
               <span>{isSaving ? 'Saving...' : 'Save Draft'}</span>
             </button>
             <button
-              onClick={handleSend}
-              disabled={isSending}
-              className="flex items-center space-x-2 px-5 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
+              onClick={handleSendClick}
+              disabled={isSending || isSaving}
+              className="flex items-center space-x-2 px-6 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors shadow-sm"
             >
               <Send className="h-4 w-4" />
               <span>{isSending ? 'Sending...' : 'Send Email'}</span>
             </button>
           </div>
         </div>
+        </div>
       </div>
-    </div>
+
+      {/* Send Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={showSendConfirm}
+        onClose={() => setShowSendConfirm(false)}
+        onConfirm={handleSend}
+        title="Send Email?"
+        message={`Are you sure you want to send this email to ${contactName} (${contactEmail})? This action cannot be undone.`}
+        confirmText="Send Email"
+        cancelText="Cancel"
+        variant="default"
+        loading={isSending}
+      />
+    </>
   )
 }
