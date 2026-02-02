@@ -415,6 +415,8 @@ interface BulkProgressModalProps {
   total: number
   status: 'running' | 'success' | 'error' | 'cancelled'
   errors?: string[]
+  skipped?: number
+  failed?: number
   onClose?: () => void
   onCancel?: () => void
 }
@@ -426,31 +428,42 @@ export function BulkProgressModal({
   total,
   status,
   errors = [],
+  skipped = 0,
+  failed = 0,
   onClose,
   onCancel,
 }: BulkProgressModalProps) {
   if (!isOpen) return null
 
+  // Build summary message
+  const buildSummary = () => {
+    const parts = []
+    if (current > 0) parts.push(`${current} sent`)
+    if (skipped > 0) parts.push(`${skipped} skipped`)
+    if (failed > 0) parts.push(`${failed} failed`)
+    return parts.join(', ') || 'Processing...'
+  }
+
   const statusConfig = {
     running: {
       icon: <Loader2 className="h-8 w-8 text-brand-600 animate-spin" />,
       color: 'text-brand-600',
-      message: `Processing ${current} of ${total}...`,
+      message: `Processing... ${current + skipped + failed} of ${total}`,
     },
     success: {
       icon: <CheckCircle className="h-8 w-8 text-green-600" />,
       color: 'text-green-600',
-      message: `Successfully processed ${current} items`,
+      message: buildSummary(),
     },
     error: {
-      icon: <AlertCircle className="h-8 w-8 text-red-600" />,
-      color: 'text-red-600',
-      message: `Completed with ${errors.length} error(s)`,
+      icon: <AlertCircle className="h-8 w-8 text-amber-600" />,
+      color: 'text-amber-600',
+      message: buildSummary(),
     },
     cancelled: {
       icon: <AlertTriangle className="h-8 w-8 text-yellow-600" />,
       color: 'text-yellow-600',
-      message: `Operation cancelled at ${current} of ${total}`,
+      message: `Cancelled: ${buildSummary()}`,
     },
   }
 
@@ -468,9 +481,32 @@ export function BulkProgressModal({
             <p className={`text-sm ${config.color}`}>{config.message}</p>
           </div>
 
+          {/* Progress bar */}
           <div className="mt-6">
-            <Progress current={current} total={total} />
+            <Progress current={current + skipped + failed} total={total} />
           </div>
+
+          {/* Stats breakdown */}
+          {(status !== 'running' || current + skipped + failed > 0) && (
+            <div className="mt-4 flex justify-center gap-6 text-sm">
+              <div className="text-center">
+                <span className="font-semibold text-green-600">{current}</span>
+                <span className="text-gray-500 ml-1">sent</span>
+              </div>
+              {skipped > 0 && (
+                <div className="text-center">
+                  <span className="font-semibold text-yellow-600">{skipped}</span>
+                  <span className="text-gray-500 ml-1">skipped</span>
+                </div>
+              )}
+              {failed > 0 && (
+                <div className="text-center">
+                  <span className="font-semibold text-red-600">{failed}</span>
+                  <span className="text-gray-500 ml-1">failed</span>
+                </div>
+              )}
+            </div>
+          )}
 
           {errors.length > 0 && (
             <div className="mt-4 max-h-32 overflow-y-auto bg-red-50 rounded-lg p-3">

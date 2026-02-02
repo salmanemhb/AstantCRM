@@ -65,13 +65,17 @@ export default function BulkOperationsPanel({
     total: number
     status: 'running' | 'success' | 'error' | 'cancelled'
     errors: string[]
+    skipped: number
+    failed: number
   }>({
     isOpen: false,
     title: '',
     current: 0,
     total: 0,
     status: 'running',
-    errors: []
+    errors: [],
+    skipped: 0,
+    failed: 0
   })
   
   // Confirm dialog state
@@ -109,7 +113,9 @@ export default function BulkOperationsPanel({
         current: 0,
         total: stats.ready_to_send,
         status: 'running',
-        errors: []
+        errors: [],
+        skipped: 0,
+        failed: 0
       })
     }
 
@@ -133,6 +139,8 @@ export default function BulkOperationsPanel({
           setProgressModal(prev => ({
             ...prev,
             current: data.result.success,
+            skipped: data.result.skipped || 0,
+            failed: data.result.failed || 0,
             status: data.result.failed > 0 ? 'error' : 'success',
             errors: data.result.errors || []
           }))
@@ -390,6 +398,8 @@ export default function BulkOperationsPanel({
         total={progressModal.total}
         status={progressModal.status}
         errors={progressModal.errors}
+        skipped={progressModal.skipped}
+        failed={progressModal.failed}
         onClose={() => setProgressModal(prev => ({ ...prev, isOpen: false }))}
       />
     </div>
