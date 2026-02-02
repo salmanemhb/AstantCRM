@@ -95,25 +95,54 @@ export function validateSubject(subject: string): EmailValidationResult {
 
 /**
  * Validate email body
+ * Body can be either a string or an object with greeting, context_p1, value_p2, cta fields
  */
-export function validateBody(body: string): EmailValidationResult {
+export function validateBody(body: string | object | null | undefined): EmailValidationResult {
   const errors: string[] = []
   const warnings: string[] = []
   
-  if (!body || typeof body !== 'string') {
+  if (!body) {
     errors.push('Email body is required')
     return { isValid: false, errors, warnings }
   }
   
-  // Strip HTML for length check
-  const plainText = body.replace(/<[^>]+>/g, '').trim()
+  // Handle object-style body (from email editor with greeting, context_p1, value_p2, cta)
+  let plainText: string
+  let rawLength: number
+  
+  if (typeof body === 'object') {
+    const bodyObj = body as Record<string, any>
+    // Combine all text parts
+    const parts = [
+      bodyObj.greeting || '',
+      bodyObj.context_p1 || '',
+      bodyObj.value_p2 || '',
+      bodyObj.cta || ''
+    ].filter(Boolean)
+    
+    // Check if we have at least some content
+    if (parts.length === 0) {
+      errors.push('Email body is required')
+      return { isValid: false, errors, warnings }
+    }
+    
+    const combinedHtml = parts.join(' ')
+    plainText = combinedHtml.replace(/<[^>]+>/g, '').trim()
+    rawLength = combinedHtml.length
+  } else if (typeof body === 'string') {
+    plainText = body.replace(/<[^>]+>/g, '').trim()
+    rawLength = body.length
+  } else {
+    errors.push('Email body is required')
+    return { isValid: false, errors, warnings }
+  }
   
   if (plainText.length < VALIDATION_CONFIG.body.minLength) {
     errors.push(`Email body must be at least ${VALIDATION_CONFIG.body.minLength} characters`)
   }
   
-  if (body.length > VALIDATION_CONFIG.body.maxLength) {
-    errors.push(`Email body is too large (${(body.length / 1024).toFixed(1)}KB, max ${VALIDATION_CONFIG.body.maxLength / 1024}KB)`)
+  if (rawLength > VALIDATION_CONFIG.body.maxLength) {
+    errors.push(`Email body is too large (${(rawLength / 1024).toFixed(1)}KB, max ${VALIDATION_CONFIG.body.maxLength / 1024}KB)`)
   }
   
   // Check for unfilled placeholders
@@ -122,14 +151,18 @@ export function validateBody(body: string): EmailValidationResult {
     errors.push(`Body contains unfilled placeholders: ${placeholderMatch.join(', ')}`)
   }
   
-  // Check for greeting
-  if (!plainText.toLowerCase().startsWith('good morning') &&
-      !plainText.toLowerCase().startsWith('good afternoon') &&
-      !plainText.toLowerCase().startsWith('good evening') &&
-      !plainText.toLowerCase().startsWith('hi ') &&
-      !plainText.toLowerCase().startsWith('hello ') &&
-      !plainText.toLowerCase().startsWith('dear ')) {
-    warnings.push('Email does not start with a greeting')
+  // Check for greeting (be more lenient - the greeting might be in a separate field)
+  const textLower = plainText.toLowerCase()
+  if (!textLower.startsWith('good morning') &&
+      !textLower.startsWith('good afternoon') &&
+      !textLower.startsWith('good evening') &&
+      !textLower.startsWith('hi ') &&
+      !textLower.startsWith('hello ') &&
+      !textLower.startsWith('dear ') &&
+      !textLower.includes('good morning') &&
+      !textLower.includes('good afternoon')) {
+    // Only warn if there's no greeting anywhere
+    warnings.push('Email may not contain a greeting')
   }
   
   return { isValid: errors.length === 0, errors, warnings }
@@ -141,7 +174,7 @@ export function validateBody(body: string): EmailValidationResult {
 export function validateEmailForSend(email: {
   to: string
   subject: string
-  body: string
+  body: string | object | null | undefined
   attachments?: Array<{ file_size: number; file_type: string }>
 }): EmailValidationResult {
   const errors: string[] = []
