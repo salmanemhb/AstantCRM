@@ -313,9 +313,9 @@ export function formatEmailWithBolding(body: any, contact?: any): any {
 
 import { SUPABASE_PROJECT_ID } from './signatures'
 
-// Supabase-hosted banner URL (upload astant.jpg to Supabase storage)
-// Cache bust: v2 = OpenMacro banner 1200x525
-export const BANNER_URL = `https://${SUPABASE_PROJECT_ID}.supabase.co/storage/v1/object/public/public-assets/astant-banner.jpg?v=2`
+// Supabase-hosted banner URL
+// v3 = Cropped OpenMacro banner (removed black padding) 1200x423
+export const BANNER_URL = `https://${SUPABASE_PROJECT_ID}.supabase.co/storage/v1/object/public/public-assets/astant-banner.jpg?v=3`
 
 export interface EmailBanner {
   enabled: boolean
@@ -337,59 +337,33 @@ export const DEFAULT_BANNER: EmailBanner = {
 // Optimized for ALL email clients including Outlook (which uses Word's rendering engine)
 // 
 // DIMENSIONS:
-// - Desktop Gmail/Outlook: 600px container, 560px banner image
-// - Mobile: Scales to 100% width with max-width constraint
-// - Aspect Ratio: 5:1 recommended (e.g., 600x120)
-// - Image should be 1200px wide for retina displays, scaled to 600px
+// - Desktop Gmail/Outlook: 600px container width
+// - Mobile: Scales to 100% width responsively
+// - Image file: 1200px wide for retina (@2x), cropped to remove black padding
 export function getBannerHtml(banner: EmailBanner): string {
   if (!banner.enabled || !banner.imageUrl) return ''
   
-  // Optimal dimensions for email banners:
-  // - Container: 600px (email standard)
-  // - Image display: 600px wide, height auto based on image ratio
-  // - Actual image file: 1200x525 for retina (@2x) - OpenMacro banner
+  // Clean, minimal banner - no extra padding or decorations
+  // The image itself has the dark background, no need for wrapper backgrounds
   const containerWidth = 600
-  const imageWidth = 600  // Full width of container for better mobile scaling
-  const imageHeight = 262 // Matches OpenMacro banner ratio (1200x525 / 2)
   
   return `
 <!-- Email Header Banner -->
 <!--[if mso]>
 <table cellpadding="0" cellspacing="0" border="0" width="${containerWidth}" align="center">
-<tr><td>
+<tr><td align="center">
 <![endif]-->
 <table cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width: ${containerWidth}px; margin: 0 auto;">
   <tr>
-    <td align="center" style="padding: 0;">
-      <!-- Top accent bar -->
-      <table cellpadding="0" cellspacing="0" border="0" width="100%">
-        <tr>
-          <td height="4" style="height: 4px; background-color: #1a365d; font-size: 1px; line-height: 1px;">&nbsp;</td>
-        </tr>
-      </table>
-      
-      <!-- Banner image container with dark background -->
-      ${banner.linkUrl ? `<a href="${banner.linkUrl}" target="_blank" style="text-decoration: none; display: block;">` : ''}
-      <table cellpadding="0" cellspacing="0" border="0" width="100%" bgcolor="#1a202c" style="background-color: #1a202c;">
-        <tr>
-          <td align="center" style="padding: 8px 0;">
-            <!--[if mso]>
-            <img src="${banner.imageUrl}" alt="${banner.altText}" width="${imageWidth}" height="${imageHeight}" style="display: block; border: 0; width: ${imageWidth}px; height: ${imageHeight}px;" />
-            <![endif]-->
-            <!--[if !mso]><!-->
-            <img src="${banner.imageUrl}" alt="${banner.altText}" style="display: block; width: 100%; max-width: ${imageWidth}px; height: auto; border: 0; outline: none;" />
-            <!--<![endif]-->
-          </td>
-        </tr>
-      </table>
+    <td align="center" style="padding: 0; margin: 0; line-height: 0; font-size: 0;">
+      ${banner.linkUrl ? `<a href="${banner.linkUrl}" target="_blank" style="text-decoration: none; display: block; line-height: 0;">` : ''}
+      <!--[if mso]>
+      <img src="${banner.imageUrl}" alt="${banner.altText}" width="${containerWidth}" style="display: block; border: 0; width: ${containerWidth}px;" />
+      <![endif]-->
+      <!--[if !mso]><!-->
+      <img src="${banner.imageUrl}" alt="${banner.altText}" style="display: block; width: 100%; max-width: ${containerWidth}px; height: auto; border: 0; outline: none; margin: 0; padding: 0;" />
+      <!--<![endif]-->
       ${banner.linkUrl ? '</a>' : ''}
-      
-      <!-- Bottom border -->
-      <table cellpadding="0" cellspacing="0" border="0" width="100%">
-        <tr>
-          <td height="1" style="height: 1px; background-color: #e2e8f0; font-size: 1px; line-height: 1px;">&nbsp;</td>
-        </tr>
-      </table>
     </td>
   </tr>
 </table>
@@ -398,7 +372,7 @@ export function getBannerHtml(banner: EmailBanner): string {
 </table>
 <![endif]-->
 <!-- Spacer after banner -->
-<table cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width: ${containerWidth}px; margin: 0 auto;"><tr><td height="16" style="height: 16px; font-size: 1px; line-height: 1px;">&nbsp;</td></tr></table>
+<table cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width: ${containerWidth}px; margin: 0 auto;"><tr><td height="20" style="height: 20px; font-size: 1px; line-height: 1px;">&nbsp;</td></tr></table>
 <!-- End Email Header Banner -->
 `
 }
