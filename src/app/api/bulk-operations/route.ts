@@ -102,6 +102,7 @@ export async function POST(request: NextRequest) {
       total: number
       success: number
       failed: number
+      skipped: number
       errors: string[]
       dry_run?: boolean
       message?: string
@@ -110,6 +111,7 @@ export async function POST(request: NextRequest) {
       total: emails.length,
       success: 0,
       failed: 0,
+      skipped: 0,
       errors: [],
     }
 
@@ -179,7 +181,7 @@ export async function POST(request: NextRequest) {
         const RETRY_BASE_DELAY_MS = 2000  // Start with 2s, exponential backoff
 
         // Helper function with retry logic for rate limit errors
-        const sendWithRetry = async (email: any, retryCount = 0): Promise<{ success: boolean; error?: string }> => {
+        const sendWithRetry = async (email: any, retryCount = 0): Promise<{ success: boolean; skipped?: boolean; error?: string }> => {
           try {
             logger.debug(`Sending email ${email.id} (attempt ${retryCount + 1}) to ${baseUrl}/api/send-email`)
             const response = await fetch(`${baseUrl}/api/send-email`, {
@@ -197,11 +199,16 @@ export async function POST(request: NextRequest) {
               return { success: false, error: `${email.id}: Server returned non-JSON response (status: ${response.status})` }
             }
 
+            const responseData = await response.json()
+
             if (response.ok) {
               return { success: true }
             }
 
-            const errorData = await response.json()
+            // Check if this email was skipped due to validation (don't retry these)
+            if (responseData.skipped) {
+              return { success: false, skipped: true, error: responseData.error }
+            }
             
             // Check if it's a rate limit error - retry with exponential backoff
             if (response.status === 429 && retryCount < MAX_RETRIES) {
@@ -211,7 +218,7 @@ export async function POST(request: NextRequest) {
               return sendWithRetry(email, retryCount + 1)
             }
 
-            return { success: false, error: `${email.id}: ${errorData.error || 'Unknown error'}` }
+            return { success: false, error: `${email.id}: ${responseData.error || 'Unknown error'}` }
           } catch (err: any) {
             // Network errors - also retry
             if (retryCount < MAX_RETRIES) {
@@ -235,6 +242,10 @@ export async function POST(request: NextRequest) {
           
           if (sendResult.success) {
             result.success++
+          } else if (sendResult.skipped) {
+            // Email was skipped due to validation (invalid email, missing body, etc.)
+            result.skipped++
+            logger.info(`Skipped email ${email.id}: ${sendResult.error}`)
           } else {
             result.failed++
             if (sendResult.error) result.errors.push(sendResult.error)
@@ -242,7 +253,7 @@ export async function POST(request: NextRequest) {
 
           // Log progress every 10 emails
           if ((i + 1) % 10 === 0) {
-            logger.info(`Progress: ${i + 1}/${approvedEmails.length} emails processed (${result.success} success, ${result.failed} failed)`)
+            logger.info(`Progress: ${i + 1}/${approvedEmails.length} processed (${result.success} sent, ${result.skipped} skipped, ${result.failed} failed)`)
           }
 
           // Add delay between emails (not after the last one)

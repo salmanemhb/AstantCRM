@@ -126,18 +126,18 @@ export async function POST(request: NextRequest) {
     logger.info('Recipient:', { contactId: contact?.id, toEmail, campaignId: campaign?.id })
 
     if (!toEmail) {
-      logger.error('No recipient email address found')
+      logger.warn('No recipient email address found - skipping')
       return NextResponse.json(
-        { success: false, error: 'No recipient email address' },
+        { success: false, error: 'No recipient email address', skipped: true },
         { status: 400 }
       )
     }
 
     // Validate recipient email format
     if (!isValidEmail(toEmail)) {
-      logger.error('Invalid recipient email format:', toEmail)
+      logger.warn('Invalid recipient email format - skipping:', toEmail)
       return NextResponse.json(
-        { success: false, error: `Invalid recipient email format: ${toEmail}` },
+        { success: false, error: `Skipped: Invalid email format (${toEmail})`, skipped: true },
         { status: 400 }
       )
     }
@@ -155,7 +155,7 @@ export async function POST(request: NextRequest) {
       // Log warnings but don't block if only warnings
       if (validation.errors.length > 0) {
         return NextResponse.json(
-          { success: false, error: 'Email validation failed', details: validation.errors },
+          { success: false, error: `Skipped: ${validation.errors.join(', ')}`, details: validation.errors, skipped: true },
           { status: 400 }
         )
       }
