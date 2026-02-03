@@ -120,17 +120,42 @@ export async function POST(request: NextRequest) {
       // APPROVE ALL
       // ============================================
       case 'approve_all': {
-        const { error } = await supabase
-          .from('emails')
-          .update({ approved: true })
-          .in('id', emails.map(e => e.id))
-
-        if (error) {
-          result.failed = emails.length
-          result.errors.push(error.message)
-        } else {
-          result.success = emails.length
+        // Only approve emails that are drafts (not already approved or sent)
+        const draftEmails = emails.filter(e => !e.approved && !e.sent_at)
+        
+        if (draftEmails.length === 0) {
+          return NextResponse.json({ 
+            success: true,
+            message: 'No draft emails to approve', 
+            result: { ...result, total: 0 } 
+          })
         }
+        
+        // Supabase .in() has a limit, chunk if needed
+        const CHUNK_SIZE = 500
+        let successCount = 0
+        let failCount = 0
+        const errors: string[] = []
+        
+        for (let i = 0; i < draftEmails.length; i += CHUNK_SIZE) {
+          const chunk = draftEmails.slice(i, i + CHUNK_SIZE)
+          const { error } = await supabase
+            .from('emails')
+            .update({ approved: true })
+            .in('id', chunk.map(e => e.id))
+          
+          if (error) {
+            failCount += chunk.length
+            errors.push(`Chunk ${Math.floor(i/CHUNK_SIZE) + 1}: ${error.message}`)
+          } else {
+            successCount += chunk.length
+          }
+        }
+        
+        result.success = successCount
+        result.failed = failCount
+        result.total = draftEmails.length
+        result.errors = errors
         break
       }
 
@@ -138,24 +163,44 @@ export async function POST(request: NextRequest) {
       // APPROVE GREEN ONLY
       // ============================================
       case 'approve_green': {
-        const greenEmails = emails.filter(e => e.confidence_score === 'green')
+        // Only approve green emails that are drafts (not already approved or sent)
+        const greenDraftEmails = emails.filter(e => 
+          e.confidence_score === 'green' && !e.approved && !e.sent_at
+        )
         
-        if (greenEmails.length === 0) {
-          return NextResponse.json({ message: 'No green emails to approve', result: { ...result, total: 0 } })
+        if (greenDraftEmails.length === 0) {
+          return NextResponse.json({ 
+            success: true,
+            message: 'No green draft emails to approve', 
+            result: { ...result, total: 0 } 
+          })
         }
 
-        const { error } = await supabase
-          .from('emails')
-          .update({ approved: true })
-          .in('id', greenEmails.map(e => e.id))
-
-        if (error) {
-          result.failed = greenEmails.length
-          result.errors.push(error.message)
-        } else {
-          result.success = greenEmails.length
-          result.total = greenEmails.length
+        // Supabase .in() has a limit, chunk if needed
+        const CHUNK_SIZE = 500
+        let successCount = 0
+        let failCount = 0
+        const errors: string[] = []
+        
+        for (let i = 0; i < greenDraftEmails.length; i += CHUNK_SIZE) {
+          const chunk = greenDraftEmails.slice(i, i + CHUNK_SIZE)
+          const { error } = await supabase
+            .from('emails')
+            .update({ approved: true })
+            .in('id', chunk.map(e => e.id))
+          
+          if (error) {
+            failCount += chunk.length
+            errors.push(`Chunk ${Math.floor(i/CHUNK_SIZE) + 1}: ${error.message}`)
+          } else {
+            successCount += chunk.length
+          }
         }
+        
+        result.success = successCount
+        result.failed = failCount
+        result.total = greenDraftEmails.length
+        result.errors = errors
         break
       }
 
