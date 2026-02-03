@@ -397,20 +397,25 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
+  // Get unsent emails for actionable counts
+  const unsentEmails = emails?.filter(e => !e.sent_at) || []
+  const draftEmails = emails?.filter(e => !e.approved && !e.sent_at) || []
+  
   const stats = {
     total: emails?.length || 0,
+    // by_confidence shows ONLY unsent emails (actionable for approval)
     by_confidence: {
-      green: emails?.filter(e => e.confidence_score === 'green').length || 0,
-      yellow: emails?.filter(e => e.confidence_score === 'yellow').length || 0,
-      red: emails?.filter(e => e.confidence_score === 'red').length || 0,
+      green: draftEmails.filter(e => e.confidence_score === 'green').length,
+      yellow: draftEmails.filter(e => e.confidence_score === 'yellow').length,
+      red: draftEmails.filter(e => e.confidence_score === 'red').length,
     },
     by_status: {
-      draft: emails?.filter(e => !e.approved && !e.sent_at).length || 0,
+      draft: draftEmails.length,
       approved: emails?.filter(e => e.approved && !e.sent_at).length || 0,
       sent: emails?.filter(e => e.sent_at).length || 0,
     },
     ready_to_send: emails?.filter(e => e.approved && !e.sent_at).length || 0,
-    needs_review: emails?.filter(e => e.confidence_score === 'red' || e.confidence_score === 'yellow').length || 0,
+    needs_review: draftEmails.filter(e => e.confidence_score === 'red' || e.confidence_score === 'yellow').length,
   }
 
   return NextResponse.json({
