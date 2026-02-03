@@ -34,23 +34,52 @@ interface ContactFiltersProps {
     filteredCount?: number
 }
 
-// Priority columns - only the most essential 4 filters
+// Priority columns - show these first in filter UI
 // Order matters - first ones show first
 const PRIORITY_COLUMNS = [
-    'tier_classification', 'tier',           // Tier
-    'seniority_level', 'seniority',          // Seniority  
-    'geographic_coverage', 'geography',       // Geography
-    'organization_type', 'media_organization' // Organization
+    // VC Investment Focus (most important for VC outreach)
+    'investment_markets', 'investment_focus', 'markets', 'focus', 'sector', 'sectors',
+    // Investor Type
+    'investor_type', 'fund_type', 'firm_type', 'type',
+    // Industry
+    'industry', 'industries',
+    // Geography
+    'country', 'geographic_coverage', 'geography', 'location', 'offices', 'region',
+    // Investment Stage
+    'investment_stages', 'investment_stage', 'stages', 'stage',
+    // Tier & Seniority
+    'tier_classification', 'tier', 'seniority_level', 'seniority', 'job_level',
+    // Role
+    'job_title', 'role', 'title', 'position',
+    // Other
+    'organization_type', 'media_organization', 'email_status', 'email_qualification',
 ]
 
 // Columns to always hide (not useful for filtering)
 const HIDDEN_COLUMNS = [
-    'contact_id', 'full_name', 'direct_email', 'email', 'mobile_phone', 'phone',
-    'linkedin_profile', 'linkedin', 'manager_email', 'manager_phone',
-    'director_email', 'director_phone', 'reporting_manager', 'editorial_director',
+    // Identity columns
+    'contact_id', 'id', 'gid', 'row_id',
+    // Name columns (too unique)
+    'full_name', 'first_name', 'last_name', 'firstname', 'lastname', 'name',
+    // Contact info
+    'direct_email', 'email', 'email_2', 'mobile_phone', 'phone', 'company_phone',
+    // Links (too unique)
+    'linkedin_profile', 'linkedin', 'company_linkedin', 'twitter', 'instagram',
+    'website', 'portfolio_link', 'crunchbase', 'pitchbook', 'person_twitter',
+    'person_detail_page_link', 'team_detail_page_link', 'person_bio',
+    // Manager info
+    'manager_email', 'manager_phone', 'director_email', 'director_phone',
+    'reporting_manager', 'editorial_director',
+    // Scores
     'last_interaction_date', 'coverage_probability', 'final_approval_authority',
-    'market_segment', 'strategic_value', 'relationship_priority', 'influence_score',
-    'editorial_focus', 'reach_potential' // Moved to hidden - too granular
+    'strategic_value', 'relationship_priority', 'influence_score',
+    'editorial_focus', 'reach_potential',
+    // Long text fields
+    'notes', 'short_firm_description', 'description', 'bio', 'about',
+    // Company identifiers
+    'vat_number', 'siren_number', 'siret', 'naf_code', 'headquarters',
+    // Address (too specific)
+    'company_headquarters_address', 'company_headquarters_zip_code', 'company_headquarters_city',
 ]
 
 // Maximum number of primary filters to show

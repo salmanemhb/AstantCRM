@@ -7,22 +7,51 @@ const supabase = createClient(supabaseUrl, supabaseKey)
 
 // Columns that are good for filtering (categorical data, not unique per row)
 const FILTERABLE_COLUMN_PATTERNS = [
-  'type', 'investor_type', 'organization_type', 'firm_type', 'fund_type',
-  'tier', 'tier_classification', 'seniority', 'seniority_level',
-  'geography', 'geographic_coverage', 'region', 'country', 'city', 'location',
-  'sector', 'sectors', 'focus', 'investment_focus', 'stage', 'investment_stage',
+  // Tier & Seniority
+  'tier', 'tier_classification', 'seniority', 'seniority_level', 'job_level',
+  // Geography
+  'geography', 'geographic_coverage', 'region', 'country', 'city', 'location', 'offices',
+  // Investment Focus (VC-specific)
+  'sector', 'sectors', 'focus', 'investment_focus', 'investment_markets', 'markets',
+  'stage', 'investment_stage', 'investment_stages', 'stages',
+  'industry', 'industries', 'thesis', 'investment_thesis',
+  // Type & Category
+  'type', 'organization_type', 'firm_type', 'fund_type', 'investor_type',
   'status', 'priority', 'category', 'segment', 'market_segment',
-  'role', 'title', 'position', 'department',
+  // Role
+  'role', 'title', 'position', 'department', 'job_title',
+  // Other VC columns
+  'founded_year', 'number_of_employees', 'email_status', 'email_qualification',
+]
+
+// Columns that should have comma-separated values split
+const SPLIT_VALUE_COLUMNS = [
+  'investment_markets', 'markets', 'investment_focus', 'focus',
+  'investment_stages', 'stages', 'sectors', 'industries',
 ]
 
 // Columns to exclude from filtering (too unique or not useful)
 const EXCLUDED_COLUMN_PATTERNS = [
-  'email', 'e-mail', 'phone', 'mobile', 'linkedin', 'twitter',
-  'first_name', 'last_name', 'firstname', 'lastname', 'name', 'full_name',
-  'notes', 'comments', 'description', 'bio', 'about',
-  'id', 'contact_id', 'row_id', 'index',
+  // Identity columns
+  'contact_id', 'id', 'gid', 'row_id', 'index',
+  // Name columns (too unique)
+  'full_name', 'first_name', 'last_name', 'firstname', 'lastname', 'name',
+  // Contact info
+  'direct_email', 'email', 'email_2', 'mobile_phone', 'phone', 'company_phone',
+  // Links (too unique)
+  'linkedin_profile', 'linkedin', 'company_linkedin', 'twitter', 'instagram',
+  'website', 'portfolio_link', 'crunchbase', 'pitchbook', 'person_twitter',
+  'person_detail_page_link', 'team_detail_page_link', 'person_bio',
+  // Long text fields
+  'notes', 'short_firm_description', 'description', 'bio', 'about', 'comments',
+  // Company identifiers
+  'vat_number', 'siren_number', 'siret', 'naf_code', 'headquarters',
+  // Address (too specific)
+  'company_headquarters_address', 'company_headquarters_zip_code', 'company_headquarters_city',
+  // Dates
   'date', 'created', 'updated', 'last_interaction',
-  'url', 'website', 'link', 'profile',
+  // URLs
+  'url', 'link', 'profile',
 ]
 
 /**
@@ -71,10 +100,22 @@ export async function POST(request: NextRequest) {
         }
 
         const strValue = String(value).trim()
-        if (strValue && strValue.length < 100) {
-          if (!filterColumns[key]) {
-            filterColumns[key] = new Set()
-          }
+        if (!strValue || strValue.length >= 200) continue // Skip empty or very long values
+        
+        // Check if this column should have values split by comma
+        const shouldSplit = SPLIT_VALUE_COLUMNS.some(sc => 
+          normalizedKey.includes(sc) || sc.includes(normalizedKey)
+        )
+        
+        if (!filterColumns[key]) {
+          filterColumns[key] = new Set()
+        }
+        
+        if (shouldSplit && strValue.includes(',')) {
+          // Split comma-separated values and add each individually
+          const parts = strValue.split(',').map(p => p.trim()).filter(p => p.length > 0 && p.length < 100)
+          parts.forEach(part => filterColumns[key].add(part))
+        } else if (strValue.length < 100) {
           filterColumns[key].add(strValue)
         }
       }

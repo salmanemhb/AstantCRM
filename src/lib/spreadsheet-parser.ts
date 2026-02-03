@@ -379,12 +379,21 @@ export function formatCellValue(value: any): string {
 
 // Columns that are good for filtering (categorical data, not unique per row)
 const FILTERABLE_COLUMNS = [
-  'tier', 'tier_classification', 'seniority', 'seniority_level',
-  'geography', 'geographic_coverage', 'region', 'country', 'city', 'location',
-  'sector', 'sectors', 'focus', 'investment_focus', 'stage', 'investment_stage',
-  'type', 'organization_type', 'firm_type', 'fund_type',
+  // Tier & Seniority
+  'tier', 'tier_classification', 'seniority', 'seniority_level', 'job_level',
+  // Geography
+  'geography', 'geographic_coverage', 'region', 'country', 'city', 'location', 'offices',
+  // Investment Focus (VC-specific)
+  'sector', 'sectors', 'focus', 'investment_focus', 'investment_markets', 'markets',
+  'stage', 'investment_stage', 'investment_stages', 'stages',
+  'industry', 'industries', 'thesis', 'investment_thesis',
+  // Type & Category
+  'type', 'organization_type', 'firm_type', 'fund_type', 'investor_type',
   'status', 'priority', 'category', 'segment', 'market_segment',
-  'role', 'title', 'position', 'department',
+  // Role
+  'role', 'title', 'position', 'department', 'job_title',
+  // Other VC columns
+  'founded_year', 'number_of_employees', 'email_status', 'email_qualification',
 ]
 
 // Columns to exclude from filtering (too unique or not useful)
@@ -422,13 +431,31 @@ export function extractFilterColumns(
     filterColumns[header] = new Set()
   }
   
+  // Columns that should have comma-separated values split
+  const SPLIT_VALUE_COLUMNS = [
+    'investment_markets', 'markets', 'investment_focus', 'focus',
+    'investment_stages', 'stages', 'sectors', 'industries',
+  ]
+  
   // Collect unique values from each row
   for (const row of rows) {
     for (const header of Object.keys(filterColumns)) {
       const value = row[header]
       if (value !== null && value !== undefined && value !== '') {
         const strValue = String(value).trim()
-        if (strValue && strValue.length < 100) { // Skip very long values
+        if (!strValue || strValue.length >= 200) continue // Skip very long values
+        
+        // Check if this column should have values split by comma
+        const normalizedHeader = header.toLowerCase().replace(/[^a-z0-9]/g, '_')
+        const shouldSplit = SPLIT_VALUE_COLUMNS.some(sc => 
+          normalizedHeader.includes(sc) || sc.includes(normalizedHeader)
+        )
+        
+        if (shouldSplit && strValue.includes(',')) {
+          // Split comma-separated values and add each individually
+          const parts = strValue.split(',').map(p => p.trim()).filter(p => p.length > 0 && p.length < 100)
+          parts.forEach(part => filterColumns[header].add(part))
+        } else if (strValue.length < 100) {
           filterColumns[header].add(strValue)
         }
       }
