@@ -333,6 +333,12 @@ export default function ContactFilters({
     )
 }
 
+// Columns that have comma-separated values (must use "contains" matching)
+const COMMA_SEPARATED_COLUMNS = [
+    'investment_markets', 'markets', 'investment_focus', 'focus',
+    'investment_stages', 'stages', 'sectors', 'industries',
+]
+
 // Helper function to filter contacts based on active filters
 export function applyFilters<T extends { raw_data?: Record<string, any> | null }>(
     contacts: T[],
@@ -362,9 +368,26 @@ export function applyFilters<T extends { raw_data?: Record<string, any> | null }
             const value = rawData[filter.column]
             if (value === undefined || value === null) return false
 
-            // Case-insensitive comparison
-            if (String(value).toLowerCase() !== filter.value.toLowerCase()) {
-                return false
+            const strValue = String(value).toLowerCase()
+            const filterValue = filter.value.toLowerCase()
+            
+            // Check if this column uses comma-separated values
+            const normalizedColumn = filter.column.toLowerCase().replace(/[^a-z0-9]/g, '_')
+            const isCommaSeparated = COMMA_SEPARATED_COLUMNS.some(cc => 
+                normalizedColumn.includes(cc) || cc.includes(normalizedColumn)
+            )
+            
+            if (isCommaSeparated) {
+                // For comma-separated columns, check if any part matches
+                const parts = strValue.split(',').map(p => p.trim())
+                if (!parts.some(part => part === filterValue || part.includes(filterValue))) {
+                    return false
+                }
+            } else {
+                // Exact match for other columns
+                if (strValue !== filterValue) {
+                    return false
+                }
             }
         }
 
