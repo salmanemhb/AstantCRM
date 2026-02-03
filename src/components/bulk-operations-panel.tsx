@@ -99,25 +99,155 @@ export default function BulkOperationsPanel({
     dry_run?: boolean
   }
 
-  const executeOperation = async (operation: string, options: OperationOptions = {}) => {
-    setLoading(operation)
+  // Chunk size for frontend-driven batching
+  // Each chunk must complete within Netlify's 10-second timeout
+  // At 700ms per email, 10 emails = 7 seconds (safe margin)
+  const CHUNK_SIZE = 10
+
+  // Fetch approved email IDs for a campaign
+  const fetchApprovedEmailIds = async (): Promise<string[]> => {
+    const response = await fetch(`/api/bulk-operations?campaign_id=${campaignId}`)
+    const data = await response.json()
+    
+    if (!data.emails) return []
+    
+    // Filter to approved and not sent
+    return data.emails
+      .filter((e: any) => e.approved && !e.sent)
+      .map((e: any) => e.id)
+  }
+
+  // Frontend-driven chunked sending to avoid Netlify timeout
+  const executeChunkedSend = async (dry_run: boolean = false) => {
+    setLoading(dry_run ? 'send_dry_run' : 'send_approved')
     setResult(null)
 
-    // For send operations, show progress modal
-    const isSendOperation = operation.includes('send') && !options.dry_run
-    
-    if (isSendOperation) {
-      setProgressModal({
-        isOpen: true,
-        title: 'Sending Emails',
-        current: 0,
-        total: stats.ready_to_send,
-        status: 'running',
-        errors: [],
-        skipped: 0,
-        failed: 0
+    // Show progress modal
+    setProgressModal({
+      isOpen: true,
+      title: dry_run ? 'Validating Emails (Dry Run)' : 'Sending Emails',
+      current: 0,
+      total: stats.ready_to_send,
+      status: 'running',
+      errors: [],
+      skipped: 0,
+      failed: 0
+    })
+
+    try {
+      // Step 1: Get all approved email IDs
+      const emailIds = await fetchApprovedEmailIds()
+      
+      if (emailIds.length === 0) {
+        setProgressModal(prev => ({
+          ...prev,
+          status: 'error',
+          errors: ['No approved emails found to send']
+        }))
+        setLoading(null)
+        return
+      }
+
+      // Update total with actual count
+      setProgressModal(prev => ({ ...prev, total: emailIds.length }))
+
+      // Step 2: Split into chunks
+      const chunks: string[][] = []
+      for (let i = 0; i < emailIds.length; i += CHUNK_SIZE) {
+        chunks.push(emailIds.slice(i, i + CHUNK_SIZE))
+      }
+
+      // Track aggregate results
+      let totalSent = 0
+      let totalSkipped = 0
+      let totalFailed = 0
+      const allErrors: string[] = []
+
+      // Step 3: Process each chunk sequentially
+      for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex++) {
+        const chunk = chunks[chunkIndex]
+        
+        try {
+          const response = await fetch('/api/bulk-operations', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              operation: dry_run ? 'send_dry_run' : 'send_approved',
+              campaign_id: campaignId,
+              email_ids: chunk,  // Only send this chunk
+            }),
+          })
+
+          const data = await response.json()
+
+          if (data.success && data.result) {
+            totalSent += data.result.success || 0
+            totalSkipped += data.result.skipped || 0
+            totalFailed += data.result.failed || 0
+            if (data.result.errors) {
+              allErrors.push(...data.result.errors)
+            }
+          } else {
+            // Chunk failed entirely
+            totalFailed += chunk.length
+            allErrors.push(data.error || `Chunk ${chunkIndex + 1} failed`)
+          }
+        } catch (err: any) {
+          // Network error for this chunk
+          totalFailed += chunk.length
+          allErrors.push(`Chunk ${chunkIndex + 1}: ${err.message}`)
+        }
+
+        // Update progress after each chunk
+        setProgressModal(prev => ({
+          ...prev,
+          current: totalSent + totalSkipped + totalFailed,
+          skipped: totalSkipped,
+          failed: totalFailed,
+          errors: allErrors.slice(-10), // Keep last 10 errors
+        }))
+      }
+
+      // Step 4: Final status
+      setProgressModal(prev => ({
+        ...prev,
+        current: totalSent + totalSkipped + totalFailed,
+        skipped: totalSkipped,
+        failed: totalFailed,
+        status: totalFailed > 0 ? 'error' : 'success',
+        errors: allErrors,
+      }))
+
+      setResult({
+        operation: dry_run ? 'send_dry_run' : 'send_approved',
+        success: totalSent,
+        failed: totalFailed,
+        total: emailIds.length,
+        dry_run,
       })
+
+      onRefresh()
+
+    } catch (err: any) {
+      setProgressModal(prev => ({
+        ...prev,
+        status: 'error',
+        errors: [err.message]
+      }))
+    } finally {
+      setLoading(null)
     }
+  }
+
+  const executeOperation = async (operation: string, options: OperationOptions = {}) => {
+    // For send operations, use chunked sending
+    if (operation === 'send_approved' || operation === 'send_dry_run') {
+      await executeChunkedSend(operation === 'send_dry_run' || options.dry_run)
+      return
+    }
+
+    setLoading(operation)
+    setResult(null)
 
     try {
       const response = await fetch('/api/bulk-operations', {
@@ -134,40 +264,12 @@ export default function BulkOperationsPanel({
 
       if (data.success) {
         setResult(data.result)
-        
-        if (isSendOperation) {
-          setProgressModal(prev => ({
-            ...prev,
-            current: data.result.success,
-            skipped: data.result.skipped || 0,
-            failed: data.result.failed || 0,
-            status: data.result.failed > 0 ? 'error' : 'success',
-            errors: data.result.errors || []
-          }))
-        }
-        
         onRefresh()
       } else {
-        if (isSendOperation) {
-          setProgressModal(prev => ({
-            ...prev,
-            status: 'error',
-            errors: [data.error]
-          }))
-        } else {
-          showToast(`Error: ${data.error}`, 'error')
-        }
+        showToast(`Error: ${data.error}`, 'error')
       }
     } catch (err: any) {
-      if (isSendOperation) {
-        setProgressModal(prev => ({
-          ...prev,
-          status: 'error',
-          errors: [err.message]
-        }))
-      } else {
-        showToast(`Error: ${err.message}`, 'error')
-      }
+      showToast(`Error: ${err.message}`, 'error')
     } finally {
       setLoading(null)
     }
