@@ -28,6 +28,7 @@ import { generateDraft } from '@/lib/api'
 import type { Contact, ContactCampaign, Email, EmailJsonBody, ContactList } from '@/lib/types'
 import { formatDate, getToneLabel } from '@/lib/utils'
 import GmailEmailComposer from '@/components/gmail-email-composer'
+import SentEmailRow from '@/components/sent-email-row'
 import ContactFilters, { applyFilters, type ActiveFilter } from '@/components/contact-filters'
 import BulkOperationsPanel, { BatchGenerationModal } from '@/components/bulk-operations-panel'
 import { getSignatureText, getMemberById } from '@/lib/signatures'
@@ -69,6 +70,9 @@ interface SavedFormat {
   savedAt: string
 }
 
+// Pagination - show 50 emails at a time for performance
+const EMAILS_PER_PAGE = 50
+
 export default function CampaignDetailPage() {
   const params = useParams()
   const router = useRouter()
@@ -108,6 +112,9 @@ export default function CampaignDetailPage() {
   // Select X contacts feature
   const [selectCount, setSelectCount] = useState<string>('')
   const [isRegeneratingFilters, setIsRegeneratingFilters] = useState(false)
+  
+  // Pagination for email list performance
+  const [displayLimit, setDisplayLimit] = useState(EMAILS_PER_PAGE)
 
   // Saved format state - stores the FORMAT/STRUCTURE to apply to other emails
   const [savedFormat, setSavedFormat] = useState<SavedFormat | null>(() => {
@@ -1073,82 +1080,134 @@ export default function CampaignDetailPage() {
             </div>
           ) : (
             <div className="p-4 space-y-3">
-              {contactCampaigns.map((cc) => {
-                const email = cc.emails?.[0]
-                if (!email) {
-                  // Show placeholder for contacts without generated emails
-                  return (
-                    <div key={cc.id} className="bg-gray-50 rounded-lg border border-gray-200 p-4 flex items-center justify-between">
-                      <div className="flex items-center space-x-3">
-                        <div className="w-10 h-10 bg-gray-200 rounded-full flex items-center justify-center">
-                          <span className="text-gray-500 font-semibold text-sm">
-                            {cc.contact?.first_name?.[0] || '?'}{cc.contact?.last_name?.[0] || ''}
-                          </span>
-                        </div>
-                        <div>
-                          <p className="font-medium text-gray-700">{cc.contact?.first_name} {cc.contact?.last_name}</p>
-                          <p className="text-sm text-gray-500">No draft generated yet</p>
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => handleRegenerateDraft(cc.contact_id)}
-                        className="px-3 py-1.5 bg-brand-600 text-white text-sm rounded-lg hover:bg-brand-700"
-                      >
-                        Generate Draft
-                      </button>
-                    </div>
-                  )
-                }
-                const isSent = cc.stage === 'sent'
-                const isApproved = cc.stage === 'approved' || email?.approved
+              {/* Sort: drafts first, then sent emails */}
+              {(() => {
+                const sortedContacts = [...contactCampaigns].sort((a, b) => {
+                  const aIsSent = a.stage === 'sent'
+                  const bIsSent = b.stage === 'sent'
+                  if (aIsSent && !bIsSent) return 1
+                  if (!aIsSent && bIsSent) return -1
+                  return 0
+                })
+                
+                // Apply display limit for pagination
+                const visibleContacts = sortedContacts.slice(0, displayLimit)
+                const hasMore = sortedContacts.length > displayLimit
+                
                 return (
-                  <GmailEmailComposer
-                    key={cc.id}
-                    email={email}
-                    contactName={`${cc.contact?.first_name} ${cc.contact?.last_name}`}
-                    contactEmail={cc.contact?.email || ''}
-                    contactFirm={cc.contact?.firm}
-                    contactInitials={`${cc.contact?.first_name?.[0] || ''}${cc.contact?.last_name?.[0] || ''}`}
-                    isApproved={!!isApproved}
-                    isSent={isSent}
-                    onApprove={async () => handleApproveEmail(email)}
-                    onUnapprove={async () => handleUnapproveEmail(email)}
-                    onSend={async () => handleSendEmail(email, cc)}
-                    onSave={async (updates) => handleSaveEmail(email.id, updates)}
-                    onRegenerate={async (senderId?: string) => handleRegenerateDraft(cc.contact_id, senderId)}
-                    onDelete={() => handleDeleteContact(cc.id, `${cc.contact?.first_name} ${cc.contact?.last_name}`)}
-                    onSaveFormat={(format) => {
-                      console.log('[CampaignPage] Saving format from email (structure only, not content)...')
-
-                      // Build email body from format data
-                      const emailBody: EmailJsonBody = {
-                        greeting: format.bodyStructure.greeting,
-                        context_p1: format.bodyStructure.context_p1,
-                        value_p2: format.bodyStructure.value_p2,
-                        cta: format.bodyStructure.cta,
-                        bannerEnabled: format.bannerEnabled,
-                        signatureMemberId: format.signatureMemberId,
-                        signature: format.signature,
+                  <>
+                    {visibleContacts.map((cc) => {
+                      const email = cc.emails?.[0]
+                      if (!email) {
+                        // Show placeholder for contacts without generated emails
+                        return (
+                          <div key={cc.id} className="bg-gray-50 rounded-lg border border-gray-200 p-4 flex items-center justify-between">
+                            <div className="flex items-center space-x-3">
+                              <div className="w-10 h-10 bg-gray-200 rounded-full flex items-center justify-center">
+                                <span className="text-gray-500 font-semibold text-sm">
+                                  {cc.contact?.first_name?.[0] || '?'}{cc.contact?.last_name?.[0] || ''}
+                                </span>
+                              </div>
+                              <div>
+                                <p className="font-medium text-gray-700">{cc.contact?.first_name} {cc.contact?.last_name}</p>
+                                <p className="text-sm text-gray-500">No draft generated yet</p>
+                              </div>
+                            </div>
+                            <button
+                              onClick={() => handleRegenerateDraft(cc.contact_id)}
+                              className="px-3 py-1.5 bg-brand-600 text-white text-sm rounded-lg hover:bg-brand-700"
+                            >
+                              Generate Draft
+                            </button>
+                          </div>
+                        )
                       }
+                      
+                      const isSent = cc.stage === 'sent'
+                      const isApproved = cc.stage === 'approved' || email?.approved
+                      
+                      // Use lightweight SentEmailRow for sent emails
+                      if (isSent) {
+                        return (
+                          <SentEmailRow
+                            key={cc.id}
+                            emailId={email.id}
+                            contactName={`${cc.contact?.first_name || ''} ${cc.contact?.last_name || ''}`}
+                            contactEmail={cc.contact?.email || ''}
+                            contactFirm={cc.contact?.firm}
+                            contactInitials={`${cc.contact?.first_name?.[0] || ''}${cc.contact?.last_name?.[0] || ''}`}
+                            subject={email.subject || 'No subject'}
+                            sentAt={email.sent_at || ''}
+                            campaignId={campaignId}
+                          />
+                        )
+                      }
+                      
+                      // Full composer only for drafts (editable)
+                      return (
+                        <GmailEmailComposer
+                          key={cc.id}
+                          email={email}
+                          contactName={`${cc.contact?.first_name} ${cc.contact?.last_name}`}
+                          contactEmail={cc.contact?.email || ''}
+                          contactFirm={cc.contact?.firm}
+                          contactInitials={`${cc.contact?.first_name?.[0] || ''}${cc.contact?.last_name?.[0] || ''}`}
+                          isApproved={!!isApproved}
+                          isSent={false}
+                          onApprove={async () => handleApproveEmail(email)}
+                          onUnapprove={async () => handleUnapproveEmail(email)}
+                          onSend={async () => handleSendEmail(email, cc)}
+                          onSave={async (updates) => handleSaveEmail(email.id, updates)}
+                          onRegenerate={async (senderId?: string) => handleRegenerateDraft(cc.contact_id, senderId)}
+                          onDelete={() => handleDeleteContact(cc.id, `${cc.contact?.first_name} ${cc.contact?.last_name}`)}
+                          onSaveFormat={(format) => {
+                            console.log('[CampaignPage] Saving format from email (structure only, not content)...')
 
-                      console.log('[CampaignPage] Format saved - will use AI to transfer structure to other emails')
+                            // Build email body from format data
+                            const emailBody: EmailJsonBody = {
+                              greeting: format.bodyStructure.greeting,
+                              context_p1: format.bodyStructure.context_p1,
+                              value_p2: format.bodyStructure.value_p2,
+                              cta: format.bodyStructure.cta,
+                              bannerEnabled: format.bannerEnabled,
+                              signatureMemberId: format.signatureMemberId,
+                              signature: format.signature,
+                            }
 
-                      // Save format with metadata (not placeholders - actual content for AI to learn from)
-                      setSavedFormat({
-                        templateBody: emailBody,
-                        templateHtml: format.htmlContent,
-                        bannerEnabled: format.bannerEnabled,
-                        savedFromEmail: email.id,
-                        savedFromContactName: cc.contact?.first_name || 'Unknown',
-                        savedAt: new Date().toISOString(),
-                      })
+                            console.log('[CampaignPage] Format saved - will use AI to transfer structure to other emails')
 
-                      setSuccessMessage('Format saved! Click "Apply Format to All" to reformat other emails with AI (content preserved).')
-                      setTimeout(() => setSuccessMessage(null), 4000)
-                    }}
-                  />
+                            // Save format with metadata (not placeholders - actual content for AI to learn from)
+                            setSavedFormat({
+                              templateBody: emailBody,
+                              templateHtml: format.htmlContent,
+                              bannerEnabled: format.bannerEnabled,
+                              savedFromEmail: email.id,
+                              savedFromContactName: cc.contact?.first_name || 'Unknown',
+                              savedAt: new Date().toISOString(),
+                            })
+
+                            setSuccessMessage('Format saved! Click "Apply Format to All" to reformat other emails with AI (content preserved).')
+                            setTimeout(() => setSuccessMessage(null), 4000)
+                          }}
+                        />
+                      )
+                    })}
+                    
+                    {/* Load More Button */}
+                    {hasMore && (
+                      <div className="pt-4 pb-2 flex justify-center">
+                        <button
+                          onClick={() => setDisplayLimit(prev => prev + EMAILS_PER_PAGE)}
+                          className="px-6 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium rounded-lg transition-colors flex items-center space-x-2"
+                        >
+                          <span>Load More ({sortedContacts.length - displayLimit} remaining)</span>
+                          <ChevronDown className="h-4 w-4" />
+                        </button>
+                      </div>
+                    )}
+                  </>
                 )
-              })}
+              })()}
             </div>
           )}
         </div>
