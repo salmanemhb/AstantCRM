@@ -31,6 +31,7 @@ import GmailEmailComposer from '@/components/gmail-email-composer'
 import ContactFilters, { applyFilters, type ActiveFilter } from '@/components/contact-filters'
 import BulkOperationsPanel, { BatchGenerationModal } from '@/components/bulk-operations-panel'
 import { getSignatureText, getMemberById } from '@/lib/signatures'
+import RichTextEditor from '@/components/rich-text-editor'
 // Note: template-utils is used by gmail-email-composer for updateSenderInBody
 
 interface LocalCampaign {
@@ -1580,12 +1581,11 @@ export default function CampaignDetailPage() {
               
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Email Body Template</label>
-                <textarea
-                  value={editBody}
-                  onChange={(e) => setEditBody(e.target.value)}
-                  rows={12}
-                  placeholder="Hi [FIRST_NAME],&#10;&#10;I'm [SENDER_FIRST_NAME] from Astant Global Management..."
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500 font-mono text-sm"
+                <RichTextEditor
+                  content={editBody}
+                  onChange={setEditBody}
+                  placeholder="Hi [FIRST_NAME], I'm [SENDER_FIRST_NAME] from Astant Global Management..."
+                  className="min-h-[300px]"
                 />
                 <p className="text-xs text-gray-500 mt-1">
                   Available placeholders: [FIRST_NAME], [LAST_NAME], [FIRM], [ROLE], [SENDER_FIRST_NAME], [SENDER_NAME], [SENDER_TITLE]
