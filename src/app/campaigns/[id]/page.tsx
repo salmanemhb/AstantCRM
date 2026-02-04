@@ -1053,25 +1053,24 @@ export default function CampaignDetailPage() {
         <div className="grid grid-cols-4 gap-4 mb-6">
           <div className="bg-white rounded-xl border border-gray-200 p-4"><p className="text-3xl font-bold text-gray-900">{stats.total}</p><p className="text-sm text-gray-500">Total VCs</p></div>
           <div className="bg-white rounded-xl border border-gray-200 p-4"><p className="text-3xl font-bold text-yellow-600">{stats.drafted}</p><p className="text-sm text-gray-500">Drafts Ready</p></div>
-          <div className="bg-white rounded-xl border border-gray-200 p-4"><p className="text-3xl font-bold text-blue-600">{stats.approved}</p><p className="text-sm text-gray-500">Approved</p></div>
-          <div className="bg-white rounded-xl border border-gray-200 p-4 relative group">
-            <p className="text-3xl font-bold text-green-600">{stats.sent}</p>
-            <p className="text-sm text-gray-500">Sent</p>
-            {stats.sent > 0 && (
-              <button
-                onClick={downloadSentEmailsCSV}
-                className="absolute top-2 right-2 p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg opacity-0 group-hover:opacity-100 transition-all"
-                title="Download sent emails as CSV"
-              >
-                <Download className="h-4 w-4" />
-              </button>
-            )}
-          </div>
+          <div className="bg-white rounded-xl border border-gray-200 p-4\"><p className=\"text-3xl font-bold text-blue-600\">{stats.approved}</p><p className=\"text-sm text-gray-500\">Approved</p></div>
+          <div className="bg-white rounded-xl border border-gray-200 p-4"><p className="text-3xl font-bold text-green-600">{stats.sent}</p><p className="text-sm text-gray-500">Sent</p></div>
         </div>
 
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
           <div className="px-6 py-4 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-gray-900 uppercase tracking-wider">Email Drafts</h2>
+            <div className="flex items-center space-x-4">
+              <h2 className="text-sm font-semibold text-gray-900 uppercase tracking-wider">Email Drafts</h2>
+              {stats.sent > 0 && (
+                <button
+                  onClick={downloadSentEmailsCSV}
+                  className="flex items-center space-x-1.5 px-3 py-1.5 bg-green-50 text-green-700 hover:bg-green-100 rounded-lg text-sm font-medium transition-colors border border-green-200"
+                >
+                  <Download className="h-4 w-4" />
+                  <span>Download Sent ({stats.sent})</span>
+                </button>
+              )}
+            </div>
 
             {/* Format Sync Controls */}
             {contactCampaigns.length >= 1 && (
