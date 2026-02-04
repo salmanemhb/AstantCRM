@@ -21,7 +21,8 @@ import {
   ChevronDown,
   ChevronRight,
   FileSpreadsheet,
-  Send
+  Send,
+  Download
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { generateDraft } from '@/lib/api'
@@ -850,6 +851,93 @@ export default function CampaignDetailPage() {
 
   const stats = { total: contactCampaigns.length, drafted: contactCampaigns.filter(cc => cc.stage === 'drafted').length, approved: contactCampaigns.filter(cc => cc.stage === 'approved').length, sent: contactCampaigns.filter(cc => cc.stage === 'sent').length }
 
+  // Download sent emails as CSV
+  const downloadSentEmailsCSV = () => {
+    const sentEmails = contactCampaigns.filter(cc => cc.stage === 'sent')
+    if (sentEmails.length === 0) {
+      setError('No sent emails to download')
+      return
+    }
+
+    // Collect all unique raw_data keys from contacts
+    const allRawDataKeys = new Set<string>()
+    sentEmails.forEach(cc => {
+      if (cc.contact?.raw_data) {
+        Object.keys(cc.contact.raw_data).forEach(key => allRawDataKeys.add(key))
+      }
+    })
+    const rawDataColumns = Array.from(allRawDataKeys).sort()
+
+    // CSV headers
+    const headers = [
+      'Status',
+      'First Name',
+      'Last Name',
+      'Email',
+      'Firm',
+      'Role',
+      'Geography',
+      'Investment Focus',
+      'Email Subject',
+      'Sent At',
+      ...rawDataColumns
+    ]
+
+    // Helper to escape CSV values
+    const escapeCSV = (value: any): string => {
+      if (value === null || value === undefined) return ''
+      const str = String(value)
+      if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+        return `"${str.replace(/"/g, '""')}"`
+      }
+      return str
+    }
+
+    // Build CSV rows
+    const rows = sentEmails.map(cc => {
+      const contact = cc.contact
+      const email = cc.emails?.[0]
+      const sentDate = email?.sent_at ? new Date(email.sent_at).toLocaleString() : ''
+      
+      const baseData = [
+        'SENT',
+        contact?.first_name || '',
+        contact?.last_name || '',
+        contact?.email || '',
+        contact?.firm || '',
+        contact?.role || '',
+        contact?.geography || '',
+        contact?.investment_focus || '',
+        email?.subject || '',
+        sentDate
+      ]
+
+      // Add raw_data columns in order
+      const rawDataValues = rawDataColumns.map(key => 
+        contact?.raw_data?.[key] ?? ''
+      )
+
+      return [...baseData, ...rawDataValues].map(escapeCSV).join(',')
+    })
+
+    // Combine headers and rows
+    const csvContent = [headers.map(escapeCSV).join(','), ...rows].join('\n')
+
+    // Create and download file
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `${campaign.name.replace(/[^a-zA-Z0-9]/g, '_')}_sent_emails_${new Date().toISOString().split('T')[0]}.csv`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+
+    setSuccessMessage(`Downloaded ${sentEmails.length} sent emails as CSV`)
+    setTimeout(() => setSuccessMessage(null), 3000)
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
       <header className="bg-white border-b border-gray-200 sticky top-0 z-40">
@@ -966,7 +1054,19 @@ export default function CampaignDetailPage() {
           <div className="bg-white rounded-xl border border-gray-200 p-4"><p className="text-3xl font-bold text-gray-900">{stats.total}</p><p className="text-sm text-gray-500">Total VCs</p></div>
           <div className="bg-white rounded-xl border border-gray-200 p-4"><p className="text-3xl font-bold text-yellow-600">{stats.drafted}</p><p className="text-sm text-gray-500">Drafts Ready</p></div>
           <div className="bg-white rounded-xl border border-gray-200 p-4"><p className="text-3xl font-bold text-blue-600">{stats.approved}</p><p className="text-sm text-gray-500">Approved</p></div>
-          <div className="bg-white rounded-xl border border-gray-200 p-4"><p className="text-3xl font-bold text-green-600">{stats.sent}</p><p className="text-sm text-gray-500">Sent</p></div>
+          <div className="bg-white rounded-xl border border-gray-200 p-4 relative group">
+            <p className="text-3xl font-bold text-green-600">{stats.sent}</p>
+            <p className="text-sm text-gray-500">Sent</p>
+            {stats.sent > 0 && (
+              <button
+                onClick={downloadSentEmailsCSV}
+                className="absolute top-2 right-2 p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg opacity-0 group-hover:opacity-100 transition-all"
+                title="Download sent emails as CSV"
+              >
+                <Download className="h-4 w-4" />
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
