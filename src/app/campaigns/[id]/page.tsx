@@ -1053,7 +1053,7 @@ export default function CampaignDetailPage() {
         <div className="grid grid-cols-4 gap-4 mb-6">
           <div className="bg-white rounded-xl border border-gray-200 p-4"><p className="text-3xl font-bold text-gray-900">{stats.total}</p><p className="text-sm text-gray-500">Total VCs</p></div>
           <div className="bg-white rounded-xl border border-gray-200 p-4"><p className="text-3xl font-bold text-yellow-600">{stats.drafted}</p><p className="text-sm text-gray-500">Drafts Ready</p></div>
-          <div className="bg-white rounded-xl border border-gray-200 p-4\"><p className=\"text-3xl font-bold text-blue-600\">{stats.approved}</p><p className=\"text-sm text-gray-500\">Approved</p></div>
+          <div className="bg-white rounded-xl border border-gray-200 p-4"><p className="text-3xl font-bold text-blue-600">{stats.approved}</p><p className="text-sm text-gray-500">Approved</p></div>
           <div className="bg-white rounded-xl border border-gray-200 p-4"><p className="text-3xl font-bold text-green-600">{stats.sent}</p><p className="text-sm text-gray-500">Sent</p></div>
         </div>
 
