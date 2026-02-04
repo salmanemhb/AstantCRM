@@ -525,9 +525,10 @@ export function BulkProgressModal({
           {status === 'running' && onCancel && (
             <button
               onClick={onCancel}
-              className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+              className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 flex items-center gap-2"
             >
-              Cancel
+              <X className="h-4 w-4" />
+              Stop Sending
             </button>
           )}
           {status !== 'running' && onClose && (

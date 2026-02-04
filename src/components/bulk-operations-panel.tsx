@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import {
   Zap,
   CheckCircle,
@@ -17,6 +17,7 @@ import {
   FileText,
   Sparkles,
   PlayCircle,
+  StopCircle,
 } from 'lucide-react'
 import { BulkProgressModal, ConfirmDialog, useToast } from './toast'
 
@@ -93,6 +94,9 @@ export default function BulkOperationsPanel({
     variant: 'default'
   })
 
+  // Stop sending ref (use ref to avoid stale closure in async loop)
+  const stopRequestedRef = useRef(false)
+
   interface OperationOptions {
     filter?: 'green' | 'yellow' | 'red' | 'all'
     sender_id?: string
@@ -119,6 +123,9 @@ export default function BulkOperationsPanel({
 
   // Frontend-driven chunked sending to avoid Netlify timeout
   const executeChunkedSend = async (dry_run: boolean = false) => {
+    // Reset stop flag
+    stopRequestedRef.current = false
+    
     setLoading(dry_run ? 'send_dry_run' : 'send_approved')
     setResult(null)
 
@@ -165,6 +172,16 @@ export default function BulkOperationsPanel({
 
       // Step 3: Process each chunk sequentially
       for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex++) {
+        // Check if stop was requested
+        if (stopRequestedRef.current) {
+          setProgressModal(prev => ({
+            ...prev,
+            status: 'cancelled',
+            errors: [...prev.errors, 'Stopped by user']
+          }))
+          break
+        }
+        
         const chunk = chunks[chunkIndex]
         
         try {
@@ -503,6 +520,9 @@ export default function BulkOperationsPanel({
         skipped={progressModal.skipped}
         failed={progressModal.failed}
         onClose={() => setProgressModal(prev => ({ ...prev, isOpen: false }))}
+        onCancel={() => {
+          stopRequestedRef.current = true
+        }}
       />
     </div>
   )
